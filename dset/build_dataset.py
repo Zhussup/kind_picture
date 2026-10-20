@@ -16,6 +16,7 @@ build_dataset.py — превращает накопленный корпус (d
 
 Запуск:  python3 build_dataset.py
 """
+import argparse
 import glob
 import json
 import os
@@ -33,17 +34,22 @@ SYSTEM_PROMPT = (
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Собирает dataset.jsonl из raw/")
+    parser.add_argument("--include-invalid", action="store_true",
+                        help="включить примеры с кодом, не прошедшим проверку синтаксиса")
+    args = parser.parse_args()
+
     shards = sorted(glob.glob(os.path.join(RAW_DIR, "shard_*.jsonl")))
     if not shards:
         print("-- raw/ пуст, сначала запусти collector.py")
         sys.exit(1)
 
     seen = set()           # id уже написанных записей (защита от дублей)
-    total, bad, dup = 0, 0, 0
+    total, bad, dup, invalid = 0, 0, 0, 0
     out = open(OUT_PATH, "w", encoding="utf-8")
     try:
         for path in shards:
-            cat_bad = cat_dup = 0
+            cat_bad = cat_dup = cat_invalid = 0
             with open(path, "r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
@@ -53,6 +59,10 @@ def main():
                         rec = json.loads(line)
                     except json.JSONDecodeError:
                         cat_bad += 1
+                        continue
+                    # code_valid False == битый python-код; у старых записей поля нет (None) — их не трогаем
+                    if rec.get("code_valid") is False and not args.include_invalid:
+                        cat_invalid += 1
                         continue
                     sid = rec.get("id")
                     if sid in seen:
@@ -71,15 +81,17 @@ def main():
                     }
                     out.write(json.dumps(row, ensure_ascii=False) + "\n")
                     total += 1
-            if cat_bad or cat_dup:
-                print(f"{os.path.basename(path)}: пропущено битых {cat_bad}, дублей {cat_dup}")
+            if cat_bad or cat_dup or cat_invalid:
+                print(f"{os.path.basename(path)}: пропущено битых строк {cat_bad}, "
+                      f"дублей {cat_dup}, невалидного кода {cat_invalid}")
             bad += cat_bad
             dup += cat_dup
+            invalid += cat_invalid
     finally:
         out.close()
 
     print(f"Готово: dataset.jsonl, уникальных примеров: {total}, "
-          f"битых строк: {bad}, дублей: {dup}")
+          f"битых строк: {bad}, дублей: {dup}, выкинуто синтакс-ошибок: {invalid}")
 
 
 if __name__ == "__main__":

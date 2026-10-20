@@ -25,9 +25,12 @@ collector.py — бесконечный сборщик корпуса для д�
 """
 
 import argparse
+import ast
 import datetime
 import json
 import os
+import random
+import re
 import signal
 import sys
 import time
@@ -45,7 +48,10 @@ SYSTEM_PROMPT = (
     "Be practical: always show working, idiomatic code in fenced code blocks "
     "and explain it clearly."
 )
-TEMPERATURE = 0.9    # 0 = всегда одинаковый ответ, 1 = максимум разнообразия
+TEMP_RANGE = (0.6, 0.95)   # температура выбирается случайно на каждый запрос:
+                           # так меньше шанс "ходить по кругу" (mode collapse)
+JITTER = (0.0, 1.5)        # случайная добавка к паузе — трафик живее и меньше
+                           # похож на машинную долбёжку (анти-абьюз защита)
 REQUEST_TIMEOUT = 900   # секунд ожидания одного ответа (облачные модели медленные)
 PAUSE = 2.0          # пауза между запросами, секунд
 MAX_SHARD_BYTES = 8 * 1024 * 1024   # разрезаем корпус на файлы по ~8 МБ
@@ -277,7 +283,20 @@ def append_sample(shard_num, record):
 # ЗАПРОС К OLLAMA
 # ---------------------------------------------------------------------------
 
-def ask_ollama(prompt):
+def validate_python_blocks(response):
+    """Проверяет синтаксис ВСЕХ code-блоков ответа (```python) через ast.parse —
+    модуль Python, который разбирает исходник в синтаксическое дерево: если текст
+    не разбирается, код заведомо битый. Возвращает (все_ли_блоки_ок, первая_ошибка)."""
+    blocks = re.findall(r"```(?:python|py)?[^\n]*\n(.*?)```", response, re.S)
+    for i, code in enumerate(blocks, 1):
+        try:
+            ast.parse(code)
+        except SyntaxError as e:
+            return False, f"блок {i}: {e.msg} (строка {e.lineno})"
+    return True, None
+
+
+def ask_ollama(prompt, temperature):
     """Один запрос к /api/chat. Возвращает (текст ответа, количество токенов).
 
     При проблеме — кидает исключение, вызывающий код решает, что делать.
@@ -289,7 +308,7 @@ def ask_ollama(prompt):
             {"role": "user", "content": prompt},
         ],
         "stream": False,
-        "options": {"temperature": TEMPERATURE},
+        "options": {"temperature": temperature},
         "keep_alive": "5m",
     }
     r = requests.post(f"{HOST}/api/chat", json=payload, timeout=REQUEST_TIMEOUT)
@@ -315,9 +334,25 @@ def log(msg):
 def do_one(index, state):
     """Генерирует и сохраняет один sample. Возвращает True при успехе."""
     category, lang, prompt = prompt_for(index)
-    log(f"#{index} [{category}/{lang}] запрос...")
+    temperature = random.uniform(*TEMP_RANGE)
+    log(f"#{index} [{category}/{lang}] запрос (t={temperature:.2f})...")
     try:
-        response, tokens = ask_ollama(prompt)
+        response, tokens = ask_ollama(prompt, temperature)
+    except requests.HTTPError as e:
+        state["samples_failed"] += 1
+        state["consecutive_errors"] += 1
+        err = "?"
+        if e.response is not None:
+            # 429 Too Many Requests / 503: если сервер прислала Retry-After —
+            # сколько секунд он просит подождать, учтём это в цикле ниже
+            err = f"HTTP {e.response.status_code}"
+            ra = e.response.headers.get("retry-after")
+            if ra:
+                state["min_backoff"] = float(ra)
+                err += f", Retry-After={float(ra):.0f}с"
+        state["last_error"] = err
+        log(f"#{index} ОШИБКА: {err}")
+        return False
     except Exception as e:
         state["samples_failed"] += 1
         state["consecutive_errors"] += 1
@@ -325,15 +360,25 @@ def do_one(index, state):
         log(f"#{index} ОШИБКА: {state['last_error']}")
         return False
 
+    # Проверка синтаксиса: только для Python (для других языков парсера под рукой нет).
+    # Не выбрасываем, а помечаем — решение "хранить/фильтровать" отложено в build_dataset.
+    if lang == "Python":
+        code_ok, code_err = validate_python_blocks(response)
+    else:
+        code_ok, code_err = True, None
+
     record = {
         "id": index,
         "ts": now_iso(),
         "model": MODEL,
         "category": category,
         "lang": lang,
+        "temperature": round(temperature, 3),
         "prompt": prompt,
         "response": response,
         "prompt_tokens": tokens,
+        "code_valid": code_ok,
+        "code_error": code_err,
     }
     repair_last_line(shard_path(state["shard_num"]))
     size = append_sample(state["shard_num"], record)
@@ -343,10 +388,13 @@ def do_one(index, state):
     state["samples_ok"] += 1
     state["consecutive_errors"] = 0
     state["last_error"] = None
+    state["min_backoff"] = None    # сервер больше не просит ждать — сбрасываем
     if size >= MAX_SHARD_BYTES:   # файл вырос — начинаем следующий
         state["shard_num"] += 1
     save_state(state)
-    log(f"#{index} OK ({tokens} токенов, сохранено в shard_{saved_shard:05d}.jsonl)")
+    code_note = "код ok" if code_ok else f"КОД БИТЫЙ ({code_err})"
+    log(f"#{index} OK ({tokens} токенов, t={temperature:.2f}, {code_note}, "
+        f"сохранено в shard_{saved_shard:05d}.jsonl)")
     return True
 
 
@@ -358,14 +406,17 @@ def run_forever(state):
     while True:
         if do_one(state["prompt_index"], state):
             backoff = 5.0
+            wait = PAUSE + random.uniform(*JITTER)
         else:
-            # экспоненциальный backoff: 5с, 10с, 20с ... до 1 часа
+            # экспоненциальный backoff: 5с, 10с, 20с ... до 1 часа;
+            # если сервер ответил Retry-After — ждём не меньше его
             backoff = min(backoff * 2, MAX_BACKOFF)
-            log(f"жду {backoff:.0f}с перед повтором")
+            wait = max(backoff, state.get("min_backoff") or 0)
+            log(f"жду {wait:.0f}с перед повтором")
         if time.time() - last_state_ts > STATE_EVERY_SECONDS:
             save_state(state)
             last_state_ts = time.time()
-        time.sleep(PAUSE)
+        time.sleep(wait)
 
 
 def main():
