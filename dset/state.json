@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "prompt_index": 8,
+  "shard_num": 1,
+  "samples_ok": 8,
+  "samples_failed": 0,
+  "consecutive_errors": 0,
+  "last_error": null,
+  "started_at": "2026-10-20T22:01:15",
+  "updated_at": "2026-10-20T22:03:06"
+}
