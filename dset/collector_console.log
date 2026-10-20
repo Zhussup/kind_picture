@@ -1,0 +1,36 @@
+[run.sh] запуск collector.py
+Traceback (most recent call last):
+  File "/home/zhus/Desktop/projects/ml/kind_picture/dset/collector.py", line 35, in <module>
+    import requests
+ModuleNotFoundError: No module named 'requests'
+[run.sh] collector вышел с кодом 1 — перезапуск через 15с
+[run.sh] запуск collector.py
+Traceback (most recent call last):
+  File "/home/zhus/Desktop/projects/ml/kind_picture/dset/collector.py", line 35, in <module>
+    import requests
+ModuleNotFoundError: No module named 'requests'
+[run.sh] collector вышел с кодом 1 — перезапуск через 15с
+[run.sh] запуск collector.py
+Traceback (most recent call last):
+  File "/home/zhus/Desktop/projects/ml/kind_picture/dset/collector.py", line 35, in <module>
+    import requests
+ModuleNotFoundError: No module named 'requests'
+[run.sh] collector вышел с кодом 1 — перезапуск через 15с
+[run.sh] запуск collector.py
+Traceback (most recent call last):
+  File "/home/zhus/Desktop/projects/ml/kind_picture/dset/collector.py", line 35, in <module>
+    import requests
+ModuleNotFoundError: No module named 'requests'
+[run.sh] collector вышел с кодом 1 — перезапуск через 15с
+[run.sh] запуск collector.py
+Traceback (most recent call last):
+  File "/home/zhus/Desktop/projects/ml/kind_picture/dset/collector.py", line 35, in <module>
+    import requests
+ModuleNotFoundError: No module named 'requests'
+[run.sh] collector вышел с кодом 1 — перезапуск через 15с
+[run.sh] запуск collector.py
+Traceback (most recent call last):
+  File "/home/zhus/Desktop/projects/ml/kind_picture/dset/collector.py", line 35, in <module>
+    import requests
+ModuleNotFoundError: No module named 'requests'
+[run.sh] collector вышел с кодом 1 — перезапуск через 15с
