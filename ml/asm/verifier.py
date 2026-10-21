@@ -67,17 +67,17 @@ def _limits():
         try:
             resource.setrlimit(res, (val, val))
         except (ValueError, OSError):
-            pass  # если ядро что-то не даёт ограничить — работаем без этого лимита
+            pass  # if the kernel does not allow limiting something, work without that limit
 
 
 def _norm(b: bytes) -> bytes:
-    """Нормализация stdout: игнорируем разницу только в хвостовых \\n."""
+    """stdout normalization: ignore differences only in trailing \\n."""
     return b.rstrip(b"\n")
 
 
 def _exit_matches(expected, got) -> bool:
-    """exit expected: None = не сверяем; <0 = сигнал (сравниваем честно);
-    >=0 — сравниваем mod 256 (syscalls exit код обрезается до байта)."""
+    """expected exit: None = do not check; <0 = signal (compare exactly);
+    >=0 — compare mod 256 (the syscall exit code is truncated to a byte)."""
     if expected is None:
         return True
     if expected < 0 or got < 0:
@@ -86,28 +86,28 @@ def _exit_matches(expected, got) -> bool:
 
 
 def _tool(cmd, timeout):
-    """Запускает as/ld, возвращает (успех, текст ошибок/предупреждений)."""
+    """Runs as/ld, returns (success, error/warning text)."""
     try:
         p = subprocess.run(cmd, capture_output=True, text=True,
                            timeout=timeout, env={})
     except subprocess.TimeoutExpired:
-        return False, f"не завершился за {timeout} с"
+        return False, f"did not finish within {timeout} s"
     except OSError as e:
         return False, f"{type(e).__name__}: {e}"
     return p.returncode == 0, (p.stderr or p.stdout).strip()
 
 
 def run_once(prog, workdir, stdin_bytes):
-    """Один прогон собранного бинаря. Никогда не зависит от содержимого программы:
-    stdin подан, вывод пойман, лимиты и таймаут обязательны."""
+    """One run of the built binary. Never depends on the program's contents:
+    stdin is provided, output is captured, limits and timeout are mandatory."""
     try:
         p = subprocess.run(
             [prog],
             input=stdin_bytes,
-            capture_output=True,     # перехватываем stdout+stderr
+            capture_output=True,     # capture stdout+stderr
             timeout=RUN_TIMEOUT,
             preexec_fn=_limits,
-            env={},                  # пустое окружение: детерминизм
+            env={},                  # empty environment: determinism
             cwd=workdir,
         )
     except subprocess.TimeoutExpired:
@@ -121,12 +121,12 @@ def run_once(prog, workdir, stdin_bytes):
 
 
 def verify(asm_text, tests):
-    """Главная функция: вердикт по тексту asm и списку тестов."""
+    """Main function: verdict for the asm text and a list of tests."""
     verdict = {
-        "assembled": False,     # прошёл as
-        "linked": False,        # прошёл ld
-        "stage": "asm",         # где остановились: asm|link|run|no_tests
-        "error": None,          # текст первой ошибки (усечённый)
+        "assembled": False,     # passed as
+        "linked": False,        # passed ld
+        "stage": "asm",         # where we stopped: asm|link|run|no_tests
+        "error": None,          # first error text (truncated)
         "tests": [],
         "n_total": len(tests),
         "n_passed": 0,
@@ -134,7 +134,7 @@ def verify(asm_text, tests):
     }
     if not isinstance(tests, list) or not tests:
         verdict["stage"] = "no_tests"
-        verdict["error"] = "список тестов пуст или битый"
+        verdict["error"] = "test list is empty or malformed"
         return verdict
 
     with tempfile.TemporaryDirectory(prefix="asmverify_") as workdir:
@@ -188,33 +188,33 @@ def verify(asm_text, tests):
 
 
 def print_human(v):
-    """Короткий человекочитаемый отчёт."""
+    """Short human-readable report."""
     if not v["assembled"]:
         print(f"[ASM FAIL] {v['error']}")
         return
     if not v["linked"]:
         print(f"[LINK FAIL] {v['error']}")
         return
-    print(f"[RUN] тесты: {v['n_passed']}/{v['n_total']}")
+    print(f"[RUN] tests: {v['n_passed']}/{v['n_total']}")
     for t in v["tests"]:
         if t["passed"]:
             print(f'  + {t["name"] or t["stdin"]!r}')
             continue
         if t["timed_out"]:
-            print(f'  - {t["name"]}: таймаут {RUN_TIMEOUT}с (висит?)')
+            print(f'  - {t["name"]}: timeout {RUN_TIMEOUT}s (hanging?)')
         elif t["exec_error"]:
-            print(f'  - {t["name"]}: exec-ошибка {t["exec_error"]}')
+            print(f'  - {t["name"]}: exec error {t["exec_error"]}')
         else:
             mark = t["signal"] or ""
-            print(f'  - {t["name"]}: exit got/охот.{t["got_exit"]}/{t["expected_exit"]} {mark}, '
-                  f'stdout got/охот. {t["got_stdout"]!r}/{t["expected_stdout"]!r}')
+            print(f'  - {t["name"]}: exit got/exp. {t["got_exit"]}/{t["expected_exit"]} {mark}, '
+                  f'stdout got/exp. {t["got_stdout"]!r}/{t["expected_stdout"]!r}')
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Верификатор asm-программ (x86-64, AT&T, _start, syscalls only)")
-    ap.add_argument("prog_s", help="исходник prog.s")
-    ap.add_argument("--tests", required=True, help="JSON-файл со списком тестов")
-    ap.add_argument("--json", action="store_true", help="вывести вердикт JSON'ом")
+    ap = argparse.ArgumentParser(description="Verifier for asm programs (x86-64, AT&T, _start, syscalls only)")
+    ap.add_argument("prog_s", help="source prog.s")
+    ap.add_argument("--tests", required=True, help="JSON file with a list of tests")
+    ap.add_argument("--json", action="store_true", help="print the verdict as JSON")
     args = ap.parse_args()
 
     try:
@@ -223,7 +223,7 @@ def main():
         with open(args.tests, "r", encoding="utf-8") as f:
             tests = json.load(f)
     except (OSError, json.JSONDecodeError) as e:
-        print(f"ошибка входа: {e}", file=sys.stderr)
+        print(f"input error: {e}", file=sys.stderr)
         sys.exit(3)
 
     verdict = verify(src, tests)

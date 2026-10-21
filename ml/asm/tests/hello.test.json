@@ -1,4 +1,4 @@
 [
-  {"name": "печатает приветствие", "stdin": "", "stdout": "Hello, verifier!\n", "exit": 0},
-  {"name": "терпит лишний \\n на конце (нормализация)", "stdin": "", "stdout": "Hello, verifier!", "exit": 0}
+  {"name": "prints a greeting", "stdin": "", "stdout": "Hello, verifier!\n", "exit": 0},
+  {"name": "tolerates an extra \\n at the end (normalization)", "stdin": "", "stdout": "Hello, verifier!", "exit": 0}
 ]
