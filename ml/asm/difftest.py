@@ -108,6 +108,7 @@ def compare(ref_c, cand_c, inputs):
         "error": None,
         "n_total": len(inputs),
         "n_passed": 0,
+        "n_skipped": 0,
         "all_match": False,
         "cases": [],
     }
@@ -129,6 +130,27 @@ def compare(ref_c, cand_c, inputs):
         for case in inputs:
             stdin_bytes = str(case.get("stdin", "")).encode()
             r = verifier.run_once(ref_exe, workdir, stdin_bytes)
+            # Если эталон сам упёрся в НАШ лимит (таймаут, SIGKILL от RLIMIT_CPU,
+            # иной сигнал), вход не задаёт осмысленного ожидания: воспроизводить
+            # «эталон убит лимитом» — не та цель, которой мы учим модель.
+            if (r["timed_out"] or r["exec_error"]
+                    or (r["exit"] is not None and r["exit"] < 0)):
+                verdict["n_skipped"] += 1
+                verdict["cases"].append({
+                    "name": case.get("name", ""),
+                    "stdin": case.get("stdin", ""),
+                    "ref_stdout": r["stdout"].decode("utf-8", "replace"),
+                    "ref_exit": r["exit"],
+                    "ref_timed_out": r["timed_out"],
+                    "cand_stdout": None,
+                    "cand_exit": None,
+                    "cand_timed_out": None,
+                    "signal": verifier.SIGNAL_HINTS.get(r["exit"]),
+                    "match": None,
+                    "reason": "эталон упёрся в лимит/сигнал — вход неинформативен",
+                })
+                continue
+
             c = verifier.run_once(cand_exe, workdir, stdin_bytes)
             match, reason = _same_behavior(r, c)
             verdict["cases"].append({
@@ -147,7 +169,12 @@ def compare(ref_c, cand_c, inputs):
             if match:
                 verdict["n_passed"] += 1
 
-    verdict["all_match"] = verdict["n_passed"] == verdict["n_total"]
+    # n_total теперь — число ИНФОРМАТИВНЫХ входов: те, где эталон убит
+    # лимитом, не в счёт (match=None)
+    verdict["n_total"] = sum(1 for x in verdict["cases"]
+                             if x["match"] is not None)
+    verdict["all_match"] = (verdict["n_total"] > 0
+                            and verdict["n_passed"] == verdict["n_total"])
     return verdict
 
 
@@ -158,9 +185,11 @@ def print_human(v):
     if not v["cand_compiled"]:
         print(f"[CAND FAIL] предсказание не собралось: {v['error']}")
         return
-    print(f"[DIFF] входы: {v['n_passed']}/{v['n_total']} совпали")
+    skipped = (f", {v['n_skipped']} неинформативны"
+               if v.get("n_skipped") else "")
+    print(f"[DIFF] входы: {v['n_passed']}/{v['n_total']} совпали{skipped}")
     for c in v["cases"]:
-        if c["match"]:
+        if c["match"] is not False:
             continue
         extra = f" ({c['signal']})" if c["signal"] else ""
         print(f'  - {c["name"]}: {c["reason"]}; '
