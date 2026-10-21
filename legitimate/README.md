@@ -10,6 +10,11 @@ navigation and scripts; the source URL remains the authoritative version.
 > This directory is a record of the terms at the retrieval date. It is not
 > legal advice. Re-check the source URLs before a public release.
 
+The raw HTML snapshots are kept locally and are intentionally not
+redistributed. `manifest.json` records their SHA-256 so the originals can be
+verified against the source URLs. The license texts, this index and the
+manifest are tracked in git; `legitimate/*.html` is covered by `.gitignore`.
+
 ## Files
 
 | File | Source | What it establishes |
