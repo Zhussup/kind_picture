@@ -1,12 +1,12 @@
 {
   "version": 1,
-  "prompt_index": 1234,
-  "shard_num": 2,
-  "samples_ok": 1234,
-  "samples_failed": 0,
+  "prompt_index": 2560,
+  "shard_num": 3,
+  "samples_ok": 2560,
+  "samples_failed": 6,
   "consecutive_errors": 0,
   "last_error": null,
   "started_at": "2026-10-20T22:01:15",
-  "updated_at": "2026-10-21T02:39:48",
+  "updated_at": "2026-10-21T08:17:31",
   "min_backoff": null
 }
