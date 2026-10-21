@@ -14,6 +14,7 @@ The repository currently contains two independent data pipelines:
 kind_picture/
 ├── dset/      corpus collector + dataset builder (general programming)
 ├── ml/asm/    asm → C dataset pipeline (collector, builder, differential tester, verifier)
+├── legacy/    archived shards from the first corpus collector (do not delete)
 ├── docs/      notes
 └── .venv/     local Python environment
 ```
@@ -187,3 +188,12 @@ python3 difftest.py ref.c cand.c # check a reconstruction
 ```
 
 Details, contracts, data format and exit codes: [ml/asm/README.md](ml/asm/README.md).
+
+---
+
+## Legacy data
+
+The first corpus (2 628 samples of general programming Q&A in many languages,
+~21 MB) was moved to `legacy/dset_raw/` after the project pivoted to the
+asm → C dataset. It is not used by the current pipeline and must not be
+deleted. Checksums and restore instructions: [legacy/README.md](legacy/README.md).
