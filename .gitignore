@@ -19,3 +19,6 @@ dset/*.pid
 
 # Uncomment only if the legacy archive should leave git too:
 # legacy/dset_raw/
+
+# Verbatim third-party HTML snapshots: kept locally, not redistributed.
+legitimate/*.html

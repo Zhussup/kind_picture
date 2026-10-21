@@ -1,0 +1,92 @@
+{
+  "project": "kind_picture",
+  "purpose": "Verbatim English-language license and terms snapshots for training and publication review.",
+  "retrieved_at_utc": "2026-10-21T09:26:56+00:00",
+  "note": "Raw HTTP response bodies. HTML includes site chrome; source URLs are authoritative. Not legal advice.",
+  "files": [
+    {
+      "file": "apache-2.0.txt",
+      "source_url": "https://www.apache.org/licenses/LICENSE-2.0.txt",
+      "bytes": 11358,
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "media_type": "text/plain"
+    },
+    {
+      "file": "beam-1.0-501b-a23b-LICENSE.txt",
+      "source_url": "https://huggingface.co/reflection/Beam-1.0-501B-A23B/raw/main/LICENSE",
+      "bytes": 11356,
+      "sha256": "43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1",
+      "media_type": "text/plain"
+    },
+    {
+      "file": "beam-model-card.html",
+      "source_url": "https://reflection.ai/beam-model-card",
+      "bytes": 612391,
+      "sha256": "3e1ad644dee3e2e8ae7f7a3e9ebcdb53ca05969882fd17cf9d03e1e80d682440",
+      "media_type": "text/html"
+    },
+    {
+      "file": "beam-usage-policy.html",
+      "source_url": "https://reflection.ai/legal/usage-policy",
+      "bytes": 400430,
+      "sha256": "9677e6e5c3f44775e75336e1bb9974f9d54d6a67613d034e406358188de418d8",
+      "media_type": "text/html"
+    },
+    {
+      "file": "deepseek-terms-of-use.html",
+      "source_url": "https://cdn.deepseek.com/policies/en-US/deepseek-terms-of-use.html",
+      "bytes": 39095,
+      "sha256": "e5c52c238ff59a6d274cd66c449f939ba6bd3183fe7927397b595df02887a76d",
+      "media_type": "text/html"
+    },
+    {
+      "file": "deepseek-v4.1-flash-LICENSE.txt",
+      "source_url": "https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash/raw/main/LICENSE",
+      "bytes": 1084,
+      "sha256": "f2c6c602815669d292889e5be8c802f2ed950653b77999b1584e8e6aed25d040",
+      "media_type": "text/plain"
+    },
+    {
+      "file": "ollama-api-authentication.html",
+      "source_url": "https://docs.ollama.com/api/authentication",
+      "bytes": 285427,
+      "sha256": "6c82b56221d90bf5fc923dc206feeb7cbf370646ca51f3f775858179541ee921",
+      "media_type": "text/html"
+    },
+    {
+      "file": "ollama-api-cloud-usage.html",
+      "source_url": "https://docs.ollama.com/api/cloud-usage",
+      "bytes": 583827,
+      "sha256": "e2ff73560f7c39b8b3d4b71b4d14e864b14c693c3715a28bf2548d2850cdd838",
+      "media_type": "text/html"
+    },
+    {
+      "file": "ollama-blog-reflection-beam.html",
+      "source_url": "https://ollama.com/blog/reflection-beam",
+      "bytes": 18965,
+      "sha256": "102977dc909ec8963dccd12d020b97778b749adaafed85a16b97a02b2bef0f56",
+      "media_type": "text/html"
+    },
+    {
+      "file": "ollama-library-beam-cloud.html",
+      "source_url": "https://ollama.com/library/beam:cloud",
+      "bytes": 127923,
+      "sha256": "5f78ea1df6463eef4ff30e704509bf953a5765338c8e23f4529861775db97497",
+      "media_type": "text/html"
+    },
+    {
+      "file": "ollama-terms.html",
+      "source_url": "https://ollama.com/terms",
+      "bytes": 23428,
+      "sha256": "6417632c735ca11edc48b8356637e6db23c72720696e17c9bb9f07141f6d9078",
+      "media_type": "text/html"
+    },
+    {
+      "file": "qwen3-0.6b-LICENSE.txt",
+      "source_url": "https://huggingface.co/Qwen/Qwen3-0.6B/raw/main/LICENSE",
+      "bytes": 11343,
+      "sha256": "832dd9e00a68dd83b3c3fb9f5588dad7dcf337a0db50f7d9483f310cd292e92e",
+      "media_type": "text/plain"
+    }
+  ]
+}
