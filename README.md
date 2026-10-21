@@ -1,101 +1,118 @@
-# dset/ — сбор корпуса для датасета про программирование
+# kind_picture
 
-Программа через Ollama API крутит бесплатную облачную модель `beam:cloud`
-круглосуточно и складывает диалоги «вопрос → ответ» про программирование.
-Потом из них собирается датасет для файнтюна нейронки.
+A learning project on the way to owning a small domain-specific language
+model: collect data, build datasets, fine-tune a small pretrained model.
 
-## Что лежит в этой папке
+The repository currently contains two independent data pipelines:
 
-| Файл/папка | Что это |
+| Pipeline | Purpose | Folder |
+|----------|---------|--------|
+| General programming corpus | broad Q&A/code corpus from an Ollama Cloud model, used as SFT material | `dset/` |
+| x86-64 asm → C dataset | narrow dataset for assembly reconstruction with mechanical verification | `ml/asm/` |
+
+```
+kind_picture/
+├── dset/      corpus collector + dataset builder (general programming)
+├── ml/asm/    asm → C dataset pipeline (collector, builder, differential tester, verifier)
+├── docs/      notes
+└── .venv/     local Python environment
+```
+
+Requirements: a running Ollama daemon with a logged-in Ollama Cloud account
+(the `beam:cloud` model), Python 3 with `requests`, and `gcc`/`binutils` for
+the asm pipeline.
+
+---
+
+## dset/ — general programming corpus
+
+The collector runs the free cloud model `beam:cloud` through the Ollama API
+around the clock and stores "prompt → answer" dialogues about programming.
+`build_dataset.py` later turns them into a fine-tuning dataset.
+
+### Files
+
+| File/folder | What it is |
 |---|---|
-| `collector.py` | сама программа-сборщик (бесконечный цикл) |
-| `build_dataset.py` | превращает накопленное в `dataset.jsonl` для файнтюна |
-| `run.sh` | запуск в фоновом режиме с автоперезапуском |
-| `stop.sh` | остановка |
-| `raw/` | папка с данными: ответы по кускам, `shard_00001.jsonl`, `shard_00002.jsonl`, ... |
-| `state.json` | **чекпоинт** — запомненный прогресс, чтобы продолжить после выключения |
-| `collector.log` | журнал работы (каждый sample и каждая ошибка) |
-| `collector_console.log` | весь вывод run.sh (в основном дублирует журнал) |
-| `dataset.jsonl` | готовый датасет (появится после `build_dataset.py`) |
+| `collector.py` | the collector itself (endless loop) |
+| `build_dataset.py` | turns collected data into `dataset.jsonl` for fine-tuning |
+| `run.sh` | starts it in the background with auto-restart |
+| `stop.sh` | stops it |
+| `raw/` | data in shards: `shard_00001.jsonl`, `shard_00002.jsonl`, … |
+| `state.json` | **checkpoint** — saved progress, so a restart continues where it stopped |
+| `collector.log` | work log (every sample and every error) |
+| `collector_console.log` | full `run.sh` output (mostly duplicates the log) |
+| `dataset.jsonl` | the finished dataset (appears after `build_dataset.py`) |
 
-## Первый запуск (проверка, что всё работает)
+### First run (sanity check)
 
-1. Оллама должна работать и ты должен быть залогинен в Ollama Cloud
-   (раз уж ты уже запускал `ollama run beam:cloud` — всё готово; сервер
-   обычно сам висит в фоне на порту 11434).
-2. Проверь связь одним запросом:
+1. Ollama must be running and logged in to Ollama Cloud (`ollama run
+   beam:cloud` once is enough; the daemon usually stays on port 11434).
+2. Check connectivity with a single request:
 
    ```bash
    cd dset
    python3 collector.py --once
    ```
 
-   Напишет `#0 OK ...` и появится `raw/shard_00001.jsonl`.
+   It prints `#0 OK ...` and creates `raw/shard_00001.jsonl`.
 
-## Постоянный запуск (24/7)
-
-```bash
-cd dset
-bash run.sh
-```
-
-Скрипт запускает сборщик в фоне (через **nohup** — программа не умрёт,
-когда закроешь терминал) и в цикле перезапускает её, если она всё же упала.
-Хочешь выжать максимум — можешь вообще не выключать ноут, но…
-
-## Выключение ноутбука / потеря интернета — не страшно
-
-- **Нет интернета** — программа не падает: ошибки логируются, повтор через
-  экспоненциальный **backoff** (5с → 10с → 20с … максимум 1 час), интернет
-  вернётся — снова пойдёт сбор.
-- **Ноут выключился** — не важно в какой момент: каждая запись перед
-  сохранением **flush + fsync**'ится на диск (принудительный сброс данных,
-  то есть на диске всегда лежат именно целые строки), а чекпоинт пишется
-  **атомарно** (через временный файл и rename — файл либо целиком старый,
-  либо целиком новый, битым быть не может).
-
-## Как заново запустить (возобновить)
-
-Просто:
+### Continuous run (24/7)
 
 ```bash
 cd dset
 bash run.sh
 ```
 
-Ничего передавать не надо — программа сама прочитает `state.json` и
-продолжит с того места, где остановилась. Промпты генерируются детерминированно
-из номера sample (без случайности), поэтому после перезапуска продолжается
-ровно со следующего непросмотренного промпта.
+The script starts the collector in the background via **nohup** (the process
+survives closing the terminal) and restarts it in a loop if it ever dies.
 
-Если выключение произошло вообще без run.sh-цикла (например, через `--once`)
-— то же самое: просто `bash run.sh`.
+### Laptop shutdown / lost network is not a problem
 
-Полезные команды:
+- **No network** — the program does not crash: errors are logged and retried
+  with exponential **backoff** (5 s → 10 s → 20 s … up to 1 hour); when the
+  network returns, collection resumes.
+- **Laptop powered off** — no matter at which moment: every record is
+  **flushed + fsync'ed** to disk before moving on (so only complete lines are
+  ever on disk), and the checkpoint is written **atomically** (temp file +
+  rename — the file is either fully old or fully new, never half-written).
+
+### Restarting (resuming)
 
 ```bash
-python3 collector.py --status   # посмотреть прогресс (samples_ok, ошибка, время)
-python3 collector.py --dry-run 3  # показать первые 3 промпта без запроса к сети
-tail -f collector.log           # смотреть живой лог
-wc -l raw/*.jsonl               # сколько примеров собрано
+cd dset
+bash run.sh
 ```
 
-## Остановка
+Nothing else to pass — the program reads `state.json` and continues from the
+last sample. Prompts are generated deterministically from the sample index (no
+randomness in prompt construction), so a restart continues exactly at the next
+unseen prompt.
+
+Useful commands:
+
+```bash
+python3 collector.py --status     # progress (samples_ok, last error, timestamps)
+python3 collector.py --dry-run 3  # print the next 3 prompts, no network
+tail -f collector.log             # live log
+wc -l raw/*.jsonl                 # how many samples collected
+```
+
+### Stopping
 
 ```bash
 cd dset
 bash stop.sh
 ```
 
-## Собрать датасет, когда собрано достаточно
+### Building the dataset
 
 ```bash
 cd dset
 python3 build_dataset.py
 ```
 
-Получишь `dataset.jsonl` — формат **JSONL** (JSON-objects построчно),
-каждая строка:
+This produces `dataset.jsonl` — **JSONL** (one JSON object per line):
 
 ```json
 {"id": 0, "category": "implement", "lang": "Python",
@@ -104,40 +121,69 @@ python3 build_dataset.py
               {"role": "assistant", "content": "..."}]}
 ```
 
-Это стандартный формат чат-датасета — годится для файнтюна Qwen2.5-0.5B
-(например через unsloth/llama-factory/axolotl) и легко конвертируется в
-plain-text для прetrain, если понадобится.
+That is the standard chat-dataset format; it works for fine-tuning a small
+Qwen-class model (0.5–0.6B) with unsloth / llama-factory / axolotl and is easy
+to convert to plain text if needed.
 
-## Доп. защиты в collector.py (работают сами)
+### Built-in protections in `collector.py`
 
-- **Джиттер** — к базовой паузе 2 с добавляется случайная добавка 0–1.5 с, чтобы
-  трафик не выглядит идеально машинным и реже задевает анти-абьюз защиту.
-- **Случайная temperature** (0.6–0.95 на каждый запрос, значение пишется в запись) —
-  при тысячах генераций с одной и той же temperature модель начинает ходить по кругу
-  (одни и те же названия переменных и приёмы) — это называется **mode collapse**.
-- **Проверка синтаксиса**: все ```python-блоки ответа прогоняются через
-  `ast.parse` (модуль, который строит синтаксическое дерево; не парсится —
-  код заведомо битый). Результат пишется в поле `code_valid`. В датасет такие
-  примеры по умолчанию **не попадают** (`build_dataset.py`); вернуть их: `--include-invalid`.
-- **429 / 503** — если сервер отвечает «Too Many Requests», из заголовка
-  `Retry-After` (сколько секунд сервер просит подождать) берётся минимум ожидания
-  и учитывается в backoff (5с → 10с → … → 1 час).
+- **Jitter** — a random 0–1.5 s is added to the base 2 s pause, so the traffic
+  does not look perfectly machine-timed and is less likely to trip anti-abuse
+  protection.
+- **Random temperature** (0.6–0.95 per request, stored in the record) — with
+  thousands of generations at one temperature the model starts repeating
+  itself (same variable names and tricks); this is called **mode collapse**.
+- **Syntax check** — every ```python block in an answer is run through
+  `ast.parse` (the module that builds a syntax tree; if it fails to parse, the
+  code is definitely broken). The result is stored in `code_valid`. Such
+  samples are excluded from the dataset by default; bring them back with
+  `--include-invalid`.
+- **429 / 503** — on "Too Many Requests" the `Retry-After` header (how many
+  seconds the server asks to wait) sets a minimum for the backoff
+  (5 s → 10 s → … → 1 hour).
 
-## Термины (на всякий случай)
+### Glossary
 
-- **Ollama API** — HTTP-интерфейс локального сервера ollama по адресу
-  `http://localhost:11434`; облачная модель `beam:cloud` вызывается так же,
-  как обычная, просто тратятся токены облака (у beam — бесплатно).
-- **Чекпоинт** (`state.json`) — маленький файл-заметка «на чём остановились»:
-  номер следующего промпта, номер шарда, статистика ошибок.
-- **JSONL** — текстовый файл, где каждая строка — отдельный JSON-объект;
-  удобно дозаписывать по одной записи, поэтому JSON, а не единый файл.
-- **Шард** — кусок данных (файл с ~8 МБ ответов). Режем, чтобы не открывать
-  гигантский файл и чтобы сбой портил максимум один кусок.
-- **fsync** — заставляет ОС записать данные на диск сразу, а не в кэше в ОЗУ;
-  иначе при выключении питания последние минуты записей пропали бы.
-- **Атомарная запись** — запись через временный файл + rename: rename —
-  атомарная операция, файл не может оказаться «наполовину записанным».
-- **Backoff** — при повторных ошибках пауза растёт (5с, 10с, 20с…),
-  чтобы не долбить упавший сервер ежесекундно.
-- **nohup** — флаг запуска, чтобы процесс не убился вместе с терминалом.
+- **Ollama API** — HTTP interface of the local ollama server at
+  `http://localhost:11434`; the cloud model `beam:cloud` is called the same
+  way as a local one (beam is free / zero-rated).
+- **Checkpoint** (`state.json`) — a small note "where we stopped": next prompt
+  index, shard number, error statistics.
+- **JSONL** — a text file where each line is a separate JSON object; easy to
+  append one record at a time.
+- **Shard** — a piece of data (a file with ~8 MB of answers), so a failure
+  damages at most one piece.
+- **fsync** — forces the OS to write data to disk immediately instead of
+  keeping it in the page cache; otherwise a power loss could lose the last
+  minutes of records.
+- **Atomic write** — write to a temp file, then rename; rename is atomic, so
+  the file can never be half-written.
+- **Backoff** — the pause grows on repeated errors (5 s, 10 s, 20 s …) instead
+  of hammering a failing server every second.
+- **nohup** — makes a process survive closing the terminal.
+
+---
+
+## ml/asm/ — x86-64 asm → C dataset
+
+The narrow pipeline: the model receives an x86-64 assembly listing in AT&T
+syntax produced by gcc and must reconstruct C with the same observable
+behavior. Correctness is checked by differential testing (same stdin → same
+stdout/exit as the original), not by comparing C text.
+
+| File | What it does |
+|---|---|
+| `gen_c.py` | asks `beam:cloud` for a C program, compiles it with gcc at `-O0` and `-O2`, stores both listings |
+| `build_dataset.py` | builds chat-format train/val JSONL (listing → original C), strips source-line leaks, deduplicates |
+| `difftest.py` | differential tester: compiles reference and predicted C, runs both on identical inputs, compares behavior |
+| `verifier.py` | runner/checker for freestanding `_start` asm programs (future line B) |
+
+```bash
+cd ml/asm
+python3 gen_c.py --once          # one collected sample
+python3 gen_c.py                 # endless collection
+python3 build_dataset.py         # rebuild dataset/train.jsonl + val.jsonl
+python3 difftest.py ref.c cand.c # check a reconstruction
+```
+
+Details, contracts, data format and exit codes: [ml/asm/README.md](ml/asm/README.md).
