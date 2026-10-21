@@ -170,20 +170,24 @@ labels for the system prompt, the user question and the assembly listing are
 set to `-100`, which cross-entropy ignores.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/training_loss_dark.png">
-  <img src="docs/training_loss_light.png"
-       alt="Training loss on assistant tokens for the smoke run: 1.38 at the first step, 0.12 at the last, over 45 optimizer steps"
+  <source media="(prefers-color-scheme: dark)" srcset="docs/training_loss_full_dark.png">
+  <img src="docs/training_loss_full_light.png"
+       alt="Full-run training loss on assistant tokens: 0.81 at the first step, 0.06 at the last, over 182 optimizer steps"
        width="840">
 </picture>
 
-The figure is the **smoke run** used to validate the pipeline: 60 short pairs,
-3 epochs, 45 optimizer steps. Loss falls from 1.38 at the first step to 0.12
-at the last (epoch averages: 0.86, 0.41, 0.21). `plot_training.py` renders it
-with **Matplotlib** (3.11.2) from `train_state.json` or a training log and
-writes the light and dark PNGs to `docs/`. On the validation set the adapter
-then answers with C code in all 16 cases (the base model sometimes copies the
-listing into a `c` block instead), while functional correctness still requires
-training on the full dataset.
+The figure is the **full run**: 723 pairs (the pairs that fit 2,048 tokens),
+2 epochs, 182 optimizer steps. Loss falls from 0.81 at the first step to 0.06
+at the last (epoch averages: 0.32 and 0.14). `plot_training.py` renders the
+figure with **Matplotlib** (3.11.2) from `train_state.json` or a training log
+and writes the light and dark PNGs to `docs/`.
+
+On the 26-pair validation set the adapter answers with C code in all 26 cases
+and compiles 19 (73.1%, up from 7 for the base model). Behavior match is still
+0%: the model has learned the shape of the programs and the API calls, but not
+yet the exact algorithms. An earlier smoke run (60 short pairs, 3 epochs)
+validated the training loop and is kept as `docs/training_loss_light.png` /
+`docs/training_loss_dark.png`.
 
 ## Usage
 

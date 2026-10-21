@@ -151,7 +151,8 @@ def render(history, out_path, title, subtitle, palette):
     ax.yaxis.set_major_locator(MaxNLocator(nbins=5))
     ax.xaxis.set_major_locator(MaxNLocator(nbins=6, integer=True))
     ax.set_ylim(0, max(losses) * 1.12)
-    ax.set_xlim(min(steps), max(steps) + max(1, max(steps) * 0.02))
+    span = max(steps) - min(steps)
+    ax.set_xlim(min(steps), max(steps) + max(2, span * 0.08))
 
     ax.set_xlabel("Optimizer step", fontsize=9.5, color=secondary, labelpad=8)
     ax.set_ylabel("Cross-entropy loss", fontsize=9.5, color=secondary,

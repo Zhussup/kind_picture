@@ -19,10 +19,11 @@
 
 ---
 
-> **Status (2026-10-21):** the pipeline works end-to-end — collection, dataset
-> building, differential verification, LoRA training and evaluation. The first
-> full fine-tuning run is in progress. Early numbers are below, reported as
-> they are.
+> **Status (2026-10-21):** the pipeline works end-to-end, and the first full
+> LoRA run is complete. The adapter compiles **73.1%** of validation answers
+> (up from 26.9% for the base model), but behavior match is still **0%** — the
+> remaining gap is algorithmic, not syntactic. Numbers are reported as they
+> are.
 
 ## The idea
 
@@ -78,22 +79,25 @@ code uses libc and PLT calls, freestanding code talks to the kernel directly.
 |-----|-----------:|---------:|--------------:|---------------|
 | Base Qwen3-0.6B | 26 pairs | 26.9% | 0% | the starting point: often copies the listing into a `c` block |
 | Smoke LoRA, 60 pairs x 3 epochs | 16 pairs* | 37.5% | 0% | format learned: **16/16** answers are C; expected to overfit |
-| Full LoRA, 723 pairs x 2 epochs | 26 pairs | in progress | in progress | first run on the real dataset |
+| Full LoRA, 723 pairs x 2 epochs | 26 pairs | **73.1%** | 0% | structure learned: all 26 answers are C; behavior is the remaining gap |
 
 \* The smoke run used the earlier 16-pair split, so it is not directly
 comparable with the 26-pair baseline. Its purpose was to validate the training
 loop, not to claim accuracy.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="ml/asm/docs/training_loss_dark.png">
-  <img src="ml/asm/docs/training_loss_light.png"
-       alt="Smoke-run training loss on assistant tokens: 1.38 at the first step, 0.12 at the last, over 45 optimizer steps"
+  <source media="(prefers-color-scheme: dark)" srcset="ml/asm/docs/training_loss_full_dark.png">
+  <img src="ml/asm/docs/training_loss_full_light.png"
+       alt="Full-run training loss on assistant tokens: 0.81 at the first step, 0.06 at the last, over 182 optimizer steps"
        width="840">
 </picture>
 
 Cross-entropy on assistant tokens only: the system prompt, the question and
 the assembly listing are masked with `-100`, so every gradient comes from the
-C answer. Loss falls from 1.38 to 0.12 over 45 optimizer steps.
+C answer. Loss falls from 0.81 to 0.06 over 182 optimizer steps (epoch
+averages: 0.32 and 0.14). The adapter compiles 19 of 26 validation answers
+(73.1%, up from 7), but none matches the reference behavior yet: it has
+learned the shape of the task, not the algorithm.
 
 ## Dataset at a glance
 
@@ -187,6 +191,7 @@ kind_picture/
 - [x] Differential tester with timeouts, memory limits and signal handling
 - [x] Evaluation harness: `compile_rate`, `pass_rate`, per-optimization split
 - [x] LoRA training with assistant-only loss and memory-aware logits
+- [x] First full training run: 73.1% compile rate on unseen pairs
 - [ ] First full run with a non-zero `pass_rate` on unseen tasks
 - [ ] Line B: freestanding `_start` programs verified by `verifier.py`
 - [ ] A larger model on a two-GPU server
@@ -198,8 +203,9 @@ This is an early research prototype, and the README says so on purpose:
 
 - The task is narrow: small hosted C programs generated from 72 templates,
   compiled by gcc. It is not a general-purpose decompiler.
-- The current model is 0.6B parameters. Behavior match on unseen tasks is
-  still 0%; the full run is the first attempt to move that number.
+- The current model is 0.6B parameters. After the first full run, 73.1% of
+  unseen answers compile but behavior match is still 0%; the model reproduces
+  task shape, not yet the exact algorithm.
 - Training skips pairs longer than `--max-seq-len` (2,048 tokens in the current
   run) rather than truncating them. Long programs are underrepresented.
 - The corpus comes from a single cloud model, so its style and mistakes are
