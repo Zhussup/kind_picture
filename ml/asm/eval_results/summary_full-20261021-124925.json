@@ -1,0 +1,34 @@
+{
+  "model": "Qwen/Qwen3-0.6B",
+  "adapter": "checkpoints/lora-full/final",
+  "val": "/home/zhus/Desktop/projects/ml/kind_picture/ml/asm/dataset/val.jsonl",
+  "n": 26,
+  "compiled": 19,
+  "passed": 0,
+  "ref_errors": 0,
+  "truncated": 2,
+  "output_kinds": {
+    "c": 26
+  },
+  "compile_rate": 0.7308,
+  "pass_rate": 0.0,
+  "by_opt": {
+    "O0": {
+      "n": 13,
+      "compile_rate": 0.7692,
+      "pass_rate": 0.0
+    },
+    "O2": {
+      "n": 13,
+      "compile_rate": 0.6923,
+      "pass_rate": 0.0
+    }
+  },
+  "decoding": {
+    "do_sample": false,
+    "max_new_tokens": 1024
+  },
+  "cases": "default",
+  "elapsed_seconds": 251.7,
+  "ts": "2026-10-21T12:53:36+05:00"
+}

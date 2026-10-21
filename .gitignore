@@ -1,2 +1,21 @@
 .venv/
-docs/
+__pycache__/
+*.py[cod]
+
+# Runtime data: kept on disk, never committed.
+ml/asm/checkpoints/
+ml/asm/raw_c/
+ml/asm/dataset/
+ml/asm/state_gen_c.json
+ml/asm/gen_c.log
+ml/asm/gen_c.out
+ml/asm/gen_c.pid
+
+dset/raw/
+dset/dataset.jsonl
+dset/state.json
+dset/*.log
+dset/*.pid
+
+# Uncomment only if the legacy archive should leave git too:
+# legacy/dset_raw/
