@@ -1,0 +1,15 @@
+{
+  "records": 25,
+  "records_broken": 0,
+  "records_no_c": 0,
+  "samples": 50,
+  "skipped_dup": 0,
+  "skipped_short": 0,
+  "skipped_not_compiled": 0,
+  "train": 50,
+  "val": 0,
+  "by_opt": {
+    "O0": 25,
+    "O2": 25
+  }
+}
