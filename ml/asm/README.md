@@ -1,25 +1,54 @@
-# ml/asm — C → ASM dataset pipeline
+# ml/asm — x86-64 asm → C dataset pipeline
 
-Narrow-domain dataset for a small programming model focused on x86-64 assembly
-in AT&T syntax (the syntax `gcc -S` emits).
+Narrow-domain dataset for a small programming model working with x86-64
+assembly in AT&T syntax (the syntax `gcc -S` emits).
 
-Two separate lines, kept in separate files on purpose:
+The current goal is **asm → C reconstruction**: the model is given a compiler
+listing and must reconstruct C code with the same observable behavior.
+Correctness is checked mechanically by **differential testing**, not by string
+comparison — any C program that behaves the same as the original is a correct
+answer.
 
-| Line | What it produces | Verifier | File |
-|------|------------------|----------|------|
-| A1 | C source → real gcc asm listing (ground truth by construction) | not needed — the compiler made the asm | `gen_c.py` |
-| B | task → `_start` program (syscalls only) + test run | `verifier.py` | planned |
+## Two data lines, kept separate
+
+| Line | What it produces | How correctness is established | File |
+|------|------------------|-------------------------------|------|
+| A1 (current) | task → C program → two gcc listings (`-O0`, `-O2`) | ground truth by construction: the asm was made by the compiler | `gen_c.py` |
+| B (planned) | task → freestanding asm program (`_start`, syscalls only) | test run via `verifier.py` | — |
+
+They are not mixed into one dataset: A1 is hosted code (`main`, libc, PLT),
+B is freestanding code (`_start`, no libc). The same question would have two
+contradictory correct answers, which turns into label noise for a small model.
+
+## Pipeline
+
+```
+gen_c.py ──► raw_c/shard_*.jsonl ──► build_dataset.py ──► dataset/train.jsonl
+                                                          dataset/val.jsonl
+                                                               │
+model answer (C) ──► difftest.py: original C vs predicted C ──► verdict
+```
 
 ## Files
 
-- `gen_c.py` — collector for line A1 (pairs "C source → gcc listing", `-O0` and `-O2`).
-- `verifier.py` — runs and checks asm programs written against the contract:
-  x86-64, AT&T syntax, entry point `_start`, no libc, I/O only through
-  `read(0)` / `write(1)` syscalls. Exit codes: `0` all tests pass, `1` assembled
-  but tests failed, `2` assembly/link failure, `3` bad input.
-- `tests/` — self-tests for the verifier (`hello.s`, `echo.s`, `crash.s`, `infinite.s`).
-- `raw_c/` — output shards of `gen_c.py` (runtime data, not committed).
-- `state_gen_c.json` — checkpoint of `gen_c.py` (runtime data, not committed).
+- `gen_c.py` — collector for line A1: asks the model (`beam:cloud`) for a C
+  program, compiles it with gcc at `-O0` and `-O2`, stores both listings.
+- `build_dataset.py` — turns raw shards into chat-format JSONL pairs
+  (listing → original C), with leak stripping, deduplication and a
+  train/val split.
+- `difftest.py` — differential tester: compiles the reference C and a
+  predicted C, runs both on the same stdin inputs, compares stdout and exit
+  codes.
+- `verifier.py` — runner/checker for line B asm programs: x86-64, AT&T syntax,
+  entry point `_start`, no libc, I/O only through `read(0)` / `write(1)`
+  syscalls. Exit codes: `0` all tests pass, `1` assembled but tests failed,
+  `2` assembly/link failure, `3` bad input.
+- `tests/` — self-tests for the verifier (`hello.s`, `echo.s`, `crash.s`,
+  `infinite.s`).
+- `raw_c/` — output shards of `gen_c.py` (runtime data).
+- `dataset/` — built `train.jsonl`, `val.jsonl`, `stats.json` (runtime data).
+- `state_gen_c.json`, `gen_c.log`, `gen_c.out`, `gen_c.pid` — checkpoint, log,
+  wrapper output and pid file of the running collector (runtime data).
 
 ## One sample of `gen_c.py`, step by step
 
@@ -58,18 +87,97 @@ comments that tie each instruction back to its source line
 (`-fverbose-asm`). The gcc version is recorded in the `gcc` field because the
 header is removed.
 
+## Dataset format (`build_dataset.py`)
+
+Each sample is a chat record:
+
+```json
+{
+  "id": "a1-17-O2",
+  "source_id": 17,
+  "opt": "O2",
+  "messages": [
+    {"role": "system", "content": "You are an expert reverse engineer. …"},
+    {"role": "user", "content": "Optimization level: -O2\n\nAssembly listing:\n```asm\n…\n```"},
+    {"role": "assistant", "content": "```c\n…\n```"}
+  ]
+}
+```
+
+- The reference record produces **two samples** (`-O0` and `-O2`).
+- **Leak stripping:** `-fverbose-asm` embeds the original source text in the
+  listing as `# prog.c:7: …` comments. If kept, reconstruction would be pure
+  copying. `build_dataset.py` removes exactly those lines
+  (`SRC_LINE_RE`); other gcc comments (operand names such as `#, f`) stay.
+  Raw shards keep the full listing, so "explain this listing" tasks can still
+  use them.
+- **Split by source record:** both listings of one C program carry the same
+  `source_id`; the train/val decision is hashed from that id, so the two
+  variants always land in the same split. Default val ratio is 2%.
+- Identical listings are deduplicated by SHA-1 of the cleaned asm.
+- Output files are written atomically (`.tmp` + `os.replace`), and a
+  half-written last line in a shard being appended to right now is skipped,
+  so rebuilding while collection is running is safe.
+
+## Differential testing (`difftest.py`)
+
+The reference C and the candidate C are compiled with the same compiler
+(`gcc -std=c11 -O0 -w`), then run on the same stdin inputs. For every input:
+
+- stdout must match after ignoring trailing newlines;
+- exit codes must match (negative values are signals, compared exactly).
+
+Rules for edge cases:
+
+- both sides time out → treated as a match (identical behavior);
+- only one side times out → mismatch;
+- a signal (SIGSEGV, SIGKILL, …) is compared as is;
+- the reference failing to compile is an input error (exit `3`), not a model
+  failure.
+
+Run isolation (wall timeout, `RLIMIT_AS`/`RLIMIT_CPU`/`RLIMIT_CORE`/
+`RLIMIT_NPROC`, empty environment) is reused from `verifier.py`.
+
+Default inputs cover typical task shapes: empty input, one integer, two
+integers, `n` followed by an array, a line of text, multiple lines. Custom
+inputs can be supplied as `[{"name": "...", "stdin": "..."}, …]`; expected
+outputs are always taken from the reference, never from the file.
+
+CLI exit codes: `0` all inputs matched, `1` behavior mismatch,
+`2` candidate failed to compile, `3` bad input.
+
 ## Usage
 
 ```bash
 cd ml/asm
-python3 gen_c.py --self-test   # offline check of the gcc part, no network
+
+# collection (line A1)
 python3 gen_c.py --dry-run 5   # print the next 5 prompts, no network
 python3 gen_c.py --status      # show the checkpoint
 python3 gen_c.py --once        # one sample, then exit
 python3 gen_c.py               # endless collection, Ctrl+C to stop
+
+# dataset
+python3 build_dataset.py                     # rebuild train/val from raw_c/
+python3 build_dataset.py --dry-run           # statistics only
+python3 build_dataset.py --val-ratio 0.02 --min-asm-lines 8
+
+# reconstruction check
+python3 difftest.py ref.c cand.c                       # default inputs
+python3 difftest.py ref.c cand.c --cases cases.json    # custom inputs
+python3 difftest.py ref.c cand.c --json                # machine-readable
+
+# line B asm programs
+python3 verifier.py prog.s --tests prog.test.json
 ```
 
+## Background collection
+
+The collector is started through a restart wrapper (`while true` loop) and
+writes to `gen_c.out` and `gen_c.log`; the wrapper pid is stored in
+`gen_c.pid`. Stop it wrapper first, otherwise it restarts the collector:
+
 ```bash
-python3 verifier.py prog.s --tests prog.test.json        # human-readable
-python3 verifier.py prog.s --tests prog.test.json --json # machine-readable
+kill "$(cat gen_c.pid)"   # stop the wrapper loop
+pkill -f "gen_c.py"       # stop the collector itself
 ```
