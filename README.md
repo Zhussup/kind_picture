@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/logo.jpg" alt="kind_picture logo: asm to C in braces" width="150">
+
 # kind_picture
 
 ### Teaching a 0.6B model to read x86-64 assembly and write back working C
@@ -113,7 +115,8 @@ side.
 
 Requirements: Python 3.13, `gcc`/`binutils`, and for training a CUDA GPU
 (the current runs use an RTX 3050 Laptop with 6 GB). Versions used here:
-PyTorch 2.6.0+cu124, Transformers 5.20.2, PEFT 0.21.2, Accelerate 1.15.0.
+PyTorch 2.6.0+cu124, Transformers 5.20.2, PEFT 0.21.2, Accelerate 1.15.0,
+Matplotlib 3.11.2 (for the training-loss figures).
 
 ```bash
 python3 -m venv .venv
@@ -140,6 +143,12 @@ python3 ml/asm/train.py --epochs 2 --max-seq-len 2048 \
 python3 ml/asm/eval.py --model Qwen/Qwen3-0.6B --tag base
 python3 ml/asm/eval.py --model Qwen/Qwen3-0.6B \
     --adapter ml/asm/checkpoints/lora-full/final --tag full
+
+# 5. regenerate the training-loss figure (light + dark PNG, matplotlib)
+python3 ml/asm/plot_training.py
+python3 ml/asm/plot_training.py \
+    --state ml/asm/checkpoints/lora-full/train_state.json \
+    --stem training_loss_full
 ```
 
 Collect more programs (needs a logged-in Ollama Cloud account and the

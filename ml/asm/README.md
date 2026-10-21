@@ -178,10 +178,12 @@ set to `-100`, which cross-entropy ignores.
 
 The figure is the **smoke run** used to validate the pipeline: 60 short pairs,
 3 epochs, 45 optimizer steps. Loss falls from 1.38 at the first step to 0.12
-at the last (epoch averages: 0.86, 0.41, 0.21). On the validation set the
-adapter then answers with C code in all 16 cases (the base model sometimes
-copies the listing into a `c` block instead), while functional correctness
-still requires training on the full dataset.
+at the last (epoch averages: 0.86, 0.41, 0.21). `plot_training.py` renders it
+with **Matplotlib** (3.11.2) from `train_state.json` or a training log and
+writes the light and dark PNGs to `docs/`. On the validation set the adapter
+then answers with C code in all 16 cases (the base model sometimes copies the
+listing into a `c` block instead), while functional correctness still requires
+training on the full dataset.
 
 ## Usage
 
