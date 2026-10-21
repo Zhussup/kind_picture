@@ -1,37 +1,37 @@
 #!/usr/bin/env python3
 """
-difftest.py — дифференциальная проверка реконструкции asm -> C.
+difftest.py — differential check of asm -> C reconstruction.
 
-Идея: у нас есть пара "листинг asm -> исходный C", которую создал gcc.
-Модель читает листинг и выдаёт свой C. Проверяем механически:
-  - компилируем ОРИГИНАЛ и ПРЕДСКАЗАНИЕ одним и тем же gcc;
-  - гоняем оба на одинаковых входах (stdin);
-  - сравниваем наблюдаемое поведение: stdout и код возврата.
-Если поведение совпало на всех входах — реконструкция функционально верна.
-Никакого сравнения текста C с эталоном: другой код с тем же поведением
-тоже правильный ответ.
+Idea: we have an "asm listing -> original C" pair produced by gcc.
+The model reads the listing and emits its own C. We check mechanically:
+  - compile the ORIGINAL and the PREDICTION with the same gcc;
+  - run both on identical inputs (stdin);
+  - compare the observable behavior: stdout and return code.
+If the behavior matches on all inputs, the reconstruction is functionally correct.
+No comparison of C text against the reference: different code with the same behavior
+is also a correct answer.
 
-Это не юнит-тесты с заранее известными ожиданиями: ожидаемый вывод
-берётся у оригинала. Поэтому любые входы допустимы — даже случайные.
+These are not unit tests with known expectations: the expected output
+is taken from the original. Therefore any inputs are acceptable — even random ones.
 
-Поведение при сбоях (честно):
-  - оба зависли            -> считаем совпадением (одинаковое поведение);
-  - завис только один      -> несовпадение;
-  - падение по сигналу     -> сравниваем сигналы как есть;
-  - оригинал не собрался   -> это ошибка входа (код 3), а не провал модели.
+Behavior on failures (honestly):
+  - both hung                 -> counted as a match (same behavior);
+  - only one hung             -> mismatch;
+  - killed by a signal        -> compare signals as they are;
+  - original failed to build  -> an input error (code 3), not a model failure.
 
-Изоляция прогонов (таймаут, RLIMIT на память/CPU/core/процессы, пустое
-окружение) переиспользуется из verifier.py — там же обоснование констант.
+Run isolation (timeout, RLIMIT on memory/CPU/core/processes, empty
+environment) is reused from verifier.py — the rationale for the constants is there too.
 
-Запуск:
-  python3 difftest.py ref.c cand.c                  встроенный набор входов
+Usage:
+  python3 difftest.py ref.c cand.c                  built-in set of inputs
   python3 difftest.py ref.c cand.c --cases cases.json
   python3 difftest.py ref.c cand.c --json
-  python3 difftest.py --self-test                   проверка самого difftest
+  python3 difftest.py --self-test                   check difftest itself
 
-Формат cases.json: [{"name": "...", "stdin": "..."}, ...]
-Коды возврата: 0 — всё совпало; 1 — расхождение поведения;
-2 — кандидат не собрался; 3 — ошибка входа.
+cases.json format: [{"name": "...", "stdin": "..."}, ...]
+Return codes: 0 — everything matched; 1 — behavior mismatch;
+2 — the candidate failed to compile; 3 — input error.
 """
 
 import argparse
@@ -44,12 +44,12 @@ import tempfile
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
 
-import verifier  # run_once, _norm, _exit_matches — та же изоляция прогонов
+import verifier  # run_once, _norm, _exit_matches — the same run isolation
 
-COMPILE_TIMEOUT = 30   # сек на один gcc (реальность: десятки мс)
+COMPILE_TIMEOUT = 30   # seconds per gcc run (in practice: tens of ms)
 
-# Входы «по умолчанию»: покрывают типичные формы наших задач
-# (пусто, одно число, два числа, n + массив, текст, несколько строк).
+# Default inputs: cover the typical shapes of our tasks
+# (empty, one number, two numbers, n + array, text, several lines).
 DEFAULT_INPUTS = [
     {"name": "empty", "stdin": ""},
     {"name": "zero", "stdin": "0\n"},
@@ -65,7 +65,7 @@ DEFAULT_INPUTS = [
 
 
 def compile_c(c_text, workdir, name):
-    """Компилирует C-текст в исполняемый файл. Возвращает (ok, путь, лог)."""
+    """Compiles C text into an executable. Returns (ok, path, log)."""
     src = os.path.join(workdir, name + ".c")
     exe = os.path.join(workdir, name)
     with open(src, "w", encoding="utf-8") as f:
@@ -75,7 +75,7 @@ def compile_c(c_text, workdir, name):
         p = subprocess.run(cmd, capture_output=True, text=True,
                            timeout=COMPILE_TIMEOUT)
     except subprocess.TimeoutExpired:
-        return False, None, f"gcc не завершился за {COMPILE_TIMEOUT} с"
+        return False, None, f"gcc did not finish within {COMPILE_TIMEOUT} s"
     except OSError as e:
         return False, None, f"{type(e).__name__}: {e}"
     if p.returncode != 0:
@@ -84,23 +84,23 @@ def compile_c(c_text, workdir, name):
 
 
 def _same_behavior(ref, cand):
-    """Сравнивает два прогона. Возвращает (match, причина_расхождения|None)."""
+    """Compares two runs. Returns (match, mismatch_reason|None)."""
     if ref["timed_out"] and cand["timed_out"]:
         return True, None
     if ref["timed_out"] != cand["timed_out"]:
-        return False, "таймаут только у одной стороны"
+        return False, "timeout on only one side"
     if ref["exec_error"] or cand["exec_error"]:
         same = ref["exec_error"] == cand["exec_error"]
-        return same, None if same else "разные ошибки запуска"
+        return same, None if same else "different exec errors"
     if verifier._norm(ref["stdout"]) != verifier._norm(cand["stdout"]):
-        return False, "stdout отличается"
+        return False, "stdout differs"
     if not verifier._exit_matches(ref["exit"], cand["exit"]):
-        return False, "код возврата отличается"
+        return False, "return code differs"
     return True, None
 
 
 def compare(ref_c, cand_c, inputs):
-    """Главная функция: вердикт по двум C-текстам и списку входов."""
+    """Main function: verdict for two C texts and a list of inputs."""
     verdict = {
         "ref_compiled": False,
         "cand_compiled": False,
@@ -130,9 +130,9 @@ def compare(ref_c, cand_c, inputs):
         for case in inputs:
             stdin_bytes = str(case.get("stdin", "")).encode()
             r = verifier.run_once(ref_exe, workdir, stdin_bytes)
-            # Если эталон сам упёрся в НАШ лимит (таймаут, SIGKILL от RLIMIT_CPU,
-            # иной сигнал), вход не задаёт осмысленного ожидания: воспроизводить
-            # «эталон убит лимитом» — не та цель, которой мы учим модель.
+            # If the reference itself hit OUR limit (timeout, SIGKILL from RLIMIT_CPU,
+            # some other signal), the input does not define a meaningful expectation:
+            # reproducing "the reference was killed by a limit" is not the goal we teach the model.
             if (r["timed_out"] or r["exec_error"]
                     or (r["exit"] is not None and r["exit"] < 0)):
                 verdict["n_skipped"] += 1
@@ -147,7 +147,7 @@ def compare(ref_c, cand_c, inputs):
                     "cand_timed_out": None,
                     "signal": verifier.SIGNAL_HINTS.get(r["exit"]),
                     "match": None,
-                    "reason": "эталон упёрся в лимит/сигнал — вход неинформативен",
+                    "reason": "reference hit a limit/signal — input is uninformative",
                 })
                 continue
 
@@ -169,8 +169,8 @@ def compare(ref_c, cand_c, inputs):
             if match:
                 verdict["n_passed"] += 1
 
-    # n_total теперь — число ИНФОРМАТИВНЫХ входов: те, где эталон убит
-    # лимитом, не в счёт (match=None)
+    # n_total is now the number of INFORMATIVE inputs: those where the reference was
+    # killed by a limit do not count (match=None)
     verdict["n_total"] = sum(1 for x in verdict["cases"]
                              if x["match"] is not None)
     verdict["all_match"] = (verdict["n_total"] > 0
@@ -180,14 +180,14 @@ def compare(ref_c, cand_c, inputs):
 
 def print_human(v):
     if not v["ref_compiled"]:
-        print(f"[REF FAIL] оригинал не собрался (ошибка входа): {v['error']}")
+        print(f"[REF FAIL] the original failed to compile (input error): {v['error']}")
         return
     if not v["cand_compiled"]:
-        print(f"[CAND FAIL] предсказание не собралось: {v['error']}")
+        print(f"[CAND FAIL] the prediction failed to compile: {v['error']}")
         return
-    skipped = (f", {v['n_skipped']} неинформативны"
+    skipped = (f", {v['n_skipped']} uninformative"
                if v.get("n_skipped") else "")
-    print(f"[DIFF] входы: {v['n_passed']}/{v['n_total']} совпали{skipped}")
+    print(f"[DIFF] inputs: {v['n_passed']}/{v['n_total']} matched{skipped}")
     for c in v["cases"]:
         if c["match"] is not False:
             continue
@@ -198,7 +198,7 @@ def print_human(v):
 
 
 # ---------------------------------------------------------------------------
-# САМОПРОВЕРКА
+# SELF-TEST
 # ---------------------------------------------------------------------------
 
 REF_C = """
@@ -239,35 +239,35 @@ int main(void) {
 
 def self_test():
     cases = [{"name": "five", "stdin": "5\n"}]
-    print("1) одинаковый C -> всё совпадает")
+    print("1) identical C -> everything matches")
     v = compare(REF_C, REF_C, cases)
     assert v["all_match"] and v["n_passed"] == 1, v
     print("   ok")
 
-    print("2) другой ответ -> расхождение")
+    print("2) different answer -> mismatch")
     v = compare(REF_C, WRONG_C, cases)
-    assert not v["all_match"] and v["cases"][0]["reason"] == "stdout отличается", v
+    assert not v["all_match"] and v["cases"][0]["reason"] == "stdout differs", v
     print("   ok")
 
-    print("3) некомпилируемый C -> cand_compile, не исключение")
+    print("3) uncompilable C -> cand_compile, not an exception")
     v = compare(REF_C, "int main(void) { this is not C }", cases)
     assert not v["cand_compiled"] and v["stage"] == "cand_compile", v
     print("   ok")
 
-    print("4) падение по сигналу детектится")
+    print("4) signal crash is detected")
     v = compare(REF_C, CRASH_C, cases)
     assert not v["all_match"], v
     assert v["cases"][0]["cand_exit"] == -11, v["cases"][0]
     print("   ok (-11 SIGSEGV)")
 
-    print("5) зависание кандидата детектится как расхождение")
+    print("5) candidate hang is detected as a mismatch")
     v = compare(REF_C, HANG_C, cases)
     c = v["cases"][0]
     assert not v["all_match"], v
-    # гонка wall-таймаута и RLIMIT_CPU: ядро может убить раньше (SIGKILL -9),
-    # поэтому принимаем оба варианта — важно, что провал детектирован
+    # race between the wall timeout and RLIMIT_CPU: the kernel may kill earlier (SIGKILL -9),
+    # so we accept both variants — what matters is that the failure is detected
     assert c["cand_timed_out"] or c["cand_exit"] == -9, c
-    print("   ok (таймаут или SIGKILL)")
+    print("   ok (timeout or SIGKILL)")
 
     print("ALL SELF-TESTS PASSED")
     return 0
@@ -275,20 +275,20 @@ def self_test():
 
 def main():
     ap = argparse.ArgumentParser(
-        description="Дифференциальная проверка реконструкции asm->C")
-    ap.add_argument("ref_c", nargs="?", help="эталонный C (оригинал)")
-    ap.add_argument("cand_c", nargs="?", help="предсказанный C (кандидат)")
-    ap.add_argument("--cases", help="JSON-файл со списком входов")
-    ap.add_argument("--json", action="store_true", help="вывести вердикт JSON'ом")
+        description="Differential check of asm->C reconstruction")
+    ap.add_argument("ref_c", nargs="?", help="reference C (original)")
+    ap.add_argument("cand_c", nargs="?", help="predicted C (candidate)")
+    ap.add_argument("--cases", help="JSON file with a list of inputs")
+    ap.add_argument("--json", action="store_true", help="print the verdict as JSON")
     ap.add_argument("--self-test", action="store_true",
-                    help="проверить сам difftest (без файлов)")
+                    help="check difftest itself (no files)")
     args = ap.parse_args()
 
     if args.self_test:
         sys.exit(self_test())
 
     if not args.ref_c or not args.cand_c:
-        ap.error("нужны ref.c и cand.c (или --self-test)")
+        ap.error("ref.c and cand.c are required (or --self-test)")
 
     try:
         with open(args.ref_c, "r", encoding="utf-8") as f:
@@ -299,11 +299,11 @@ def main():
             with open(args.cases, "r", encoding="utf-8") as f:
                 inputs = json.load(f)
             if not isinstance(inputs, list) or not inputs:
-                raise ValueError("cases.json должен быть непустым списком")
+                raise ValueError("cases.json must be a non-empty list")
         else:
             inputs = DEFAULT_INPUTS
     except (OSError, json.JSONDecodeError, ValueError) as e:
-        print(f"ошибка входа: {e}", file=sys.stderr)
+        print(f"input error: {e}", file=sys.stderr)
         sys.exit(3)
 
     verdict = compare(ref_c, cand_c, inputs)

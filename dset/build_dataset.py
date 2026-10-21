@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """
-build_dataset.py — превращает накопленный корпус (dset/raw/*.jsonl)
-в готовый датасет для файнтюна: dset/dataset.jsonl.
+build_dataset.py — turns the accumulated corpus (dset/raw/*.jsonl)
+into a ready dataset for fine-tuning: dset/dataset.jsonl.
 
-Что делает:
-  - читает все шарды по порядку;
-  - пропускает битые строки (на всякий случай, хотя чекпоинт их и так чинит);
-  - убирает дубликаты по полю "id";
-  - складывает всё в один файл dataset.jsonl в формате chat:
+What it does:
+  - reads all shards in order;
+  - skips broken lines (just in case, although the checkpoint repairs them anyway);
+  - removes duplicates by the "id" field;
+  - puts everything into one dataset.jsonl file in chat format:
         {"messages": [{"role":"system","content":...},
                       {"role":"user","content":...},
                       {"role":"assistant","content":...}], ...}
-    — это стандартный формат, который понимают тулзы файнтюна (axolotl,
-      unsloth, llama-factory и т.п.), и из него легко получить и plain-text.
+    — this is the standard format understood by fine-tuning tools (axolotl,
+      unsloth, llama-factory, etc.), and plain text is easy to derive from it.
 
-Запуск:  python3 build_dataset.py
+Run:  python3 build_dataset.py
 """
 import argparse
 import glob
@@ -34,17 +34,17 @@ SYSTEM_PROMPT = (
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Собирает dataset.jsonl из raw/")
+    parser = argparse.ArgumentParser(description="Builds dataset.jsonl from raw/")
     parser.add_argument("--include-invalid", action="store_true",
-                        help="включить примеры с кодом, не прошедшим проверку синтаксиса")
+                        help="include examples whose code failed syntax validation")
     args = parser.parse_args()
 
     shards = sorted(glob.glob(os.path.join(RAW_DIR, "shard_*.jsonl")))
     if not shards:
-        print("-- raw/ пуст, сначала запусти collector.py")
+        print("-- raw/ is empty, run collector.py first")
         sys.exit(1)
 
-    seen = set()           # id уже написанных записей (защита от дублей)
+    seen = set()           # ids of records already written (duplicate protection)
     total, bad, dup, invalid = 0, 0, 0, 0
     out = open(OUT_PATH, "w", encoding="utf-8")
     try:
@@ -60,7 +60,7 @@ def main():
                     except json.JSONDecodeError:
                         cat_bad += 1
                         continue
-                    # code_valid False == битый python-код; у старых записей поля нет (None) — их не трогаем
+                    # code_valid False == broken python code; older records lack the field (None) — leave them alone
                     if rec.get("code_valid") is False and not args.include_invalid:
                         cat_invalid += 1
                         continue
@@ -82,16 +82,16 @@ def main():
                     out.write(json.dumps(row, ensure_ascii=False) + "\n")
                     total += 1
             if cat_bad or cat_dup or cat_invalid:
-                print(f"{os.path.basename(path)}: пропущено битых строк {cat_bad}, "
-                      f"дублей {cat_dup}, невалидного кода {cat_invalid}")
+                print(f"{os.path.basename(path)}: skipped broken lines {cat_bad}, "
+                      f"duplicates {cat_dup}, invalid code {cat_invalid}")
             bad += cat_bad
             dup += cat_dup
             invalid += cat_invalid
     finally:
         out.close()
 
-    print(f"Готово: dataset.jsonl, уникальных примеров: {total}, "
-          f"битых строк: {bad}, дублей: {dup}, выкинуто синтакс-ошибок: {invalid}")
+    print(f"Done: dataset.jsonl, unique examples: {total}, "
+          f"broken lines: {bad}, duplicates: {dup}, syntax errors dropped: {invalid}")
 
 
 if __name__ == "__main__":

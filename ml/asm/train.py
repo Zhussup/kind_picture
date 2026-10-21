@@ -1,37 +1,38 @@
 #!/usr/bin/env python3
 """
-train.py — LoRA SFT (supervised fine-tuning) для asm -> C.
+train.py — LoRA SFT (supervised fine-tuning) for asm -> C.
 
-Что делает:
-  1. читает dataset/train.jsonl (chat-пары «листинг -> C»);
-  2. собирает для каждой пары токены полного диалога и маскирует ЛОСС так,
-     чтобы он считался только на ответе ассистента (C-коде), а не на
-     системном промпте и листинге asm;
-  3. навешивает LoRA-адаптер на Qwen3-0.6B: базовые веса заморожены,
-     обучаются только маленькие матрицы-добавки;
-  4. обучает несколько эпох и сохраняет адаптер в checkpoints/lora-<tag>/.
+What it does:
+  1. reads dataset/train.jsonl (chat pairs "listing -> C");
+  2. tokenizes each full dialogue and masks the LOSS so that it is computed
+     only on the assistant's answer (the C code), not on the system prompt
+     and the asm listing;
+  3. attaches a LoRA adapter to Qwen3-0.6B: the base weights stay frozen,
+     only small additive matrices are trained;
+  4. trains for a few epochs and saves the adapter to
+     checkpoints/lora-<tag>/.
 
-Зачем masked loss (маска лосса):
-  В chat-формате модель видит system + user + assistant. Если считать лосс
-  на всех токенах, модель тратит ёмкость на воспроизведение промпта и
-  листинга. Мы заменяем метки промпта на -100 — cross_entropy игнорирует
-  такие позиции, и градиент идёт только от C-ответа.
+Why masked loss:
+  In chat format the model sees system + user + assistant. If the loss is
+  computed on every token, the model wastes capacity reproducing the prompt
+  and the listing. We replace the prompt labels with -100 — cross_entropy
+  ignores those positions, so the gradient comes only from the C answer.
 
-Почему LoRA, а не полный fine-tune:
-  6 ГБ видеопамяти. Полные градиенты + состояния Adam для 0.6B — это
-  несколько гигабайт сверх весов. LoRA обучает ~1% параметров, состояния
-  оптимизатора занимают десятки мегабайт; базовые веса остаются bf16.
-  Gradient checkpointing дополнительно снижает память активаций (ценой
-  повторного forward на backward).
+Why LoRA instead of full fine-tuning:
+  6 GB of VRAM. Full gradients plus Adam states for 0.6B take several extra
+  gigabytes on top of the weights. LoRA trains ~1% of the parameters and the
+  optimizer state is tens of megabytes; the base weights stay in bf16.
+  Gradient checkpointing further reduces activation memory at the cost of a
+  repeated forward pass during backward.
 
-Запуск (дымовой прогон, переобучение на 60 коротких парах):
+Run (smoke test, overfit on 60 short pairs):
   python3 train.py --limit 60 --epochs 3 --max-seq-len 1024 \
       --grad-accum 4 --tag smoke
 
-Полный прогон:
+Full run:
   python3 train.py --epochs 2 --max-seq-len 2048 --grad-accum 8 --tag full
 
-Дальше адаптер проверяется тем же eval.py:
+The adapter is then checked with the same eval.py:
   python3 eval.py --model Qwen/Qwen3-0.6B \
       --adapter checkpoints/lora-smoke/final --tag smoke
 """
@@ -45,6 +46,7 @@ import sys
 import time
 
 import torch
+import torch.nn.functional as F
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import LoraConfig, get_peft_model
 
@@ -61,7 +63,7 @@ def now_iso():
 
 
 # ---------------------------------------------------------------------------
-# ДАННЫЕ
+# DATA
 # ---------------------------------------------------------------------------
 
 def load_rows(path, limit=0):
@@ -78,9 +80,9 @@ def load_rows(path, limit=0):
 
 
 def ids_of(enc):
-    """apply_chat_template(tokenize=True) в разных версиях transformers
-    возвращает то список id, то BatchEncoding, то список списков.
-    Приводим к плоскому списку int."""
+    """apply_chat_template(tokenize=True) returns a plain list of ids, a
+    BatchEncoding, or a list of lists depending on the transformers version.
+    Normalize it to a flat list of ints."""
     x = enc["input_ids"] if hasattr(enc, "keys") and "input_ids" in enc else enc
     if x and isinstance(x[0], (list, tuple)):
         x = x[0]
@@ -88,9 +90,9 @@ def ids_of(enc):
 
 
 def apply_template(tokenizer, msgs, add_generation_prompt):
-    """Рендер чата в токены. enable_thinking=False для Qwen3: в датасете
-    ответы без блока рассуждений, и на обучении шаблон должен совпадать
-    с тем, что делает eval.py."""
+    """Render the chat into tokens. enable_thinking=False for Qwen3: the
+    dataset answers contain no reasoning block, and the template at training
+    time must match what eval.py does."""
     try:
         return tokenizer.apply_chat_template(
             msgs, tokenize=True,
@@ -103,13 +105,13 @@ def apply_template(tokenizer, msgs, add_generation_prompt):
 
 
 def encode_sample(tokenizer, sample):
-    """Полный диалог + позиция, с которой начинается ответ ассистента.
+    """Full dialogue plus the position where the assistant answer starts.
 
-    Токены промпта получают метку -100 (игнорируются лоссом).
-    Промпт рендерится тем же шаблоном с add_generation_prompt=True —
-    он является точным префиксом полного диалога; на 100 проверенных
-    парах префикс совпадал побайтово. На всякий случай есть fallback:
-    если префикс не совпал, берём длину общего начала.
+    Prompt tokens get label -100 (ignored by the loss). The prompt is rendered
+    with the same template using add_generation_prompt=True — it is an exact
+    prefix of the full dialogue; on 100 checked pairs the prefix matched
+    token for token. As a safeguard, if the prefix does not match, the length
+    of the common prefix is used instead.
     """
     msgs = sample["messages"]
     full = ids_of(apply_template(tokenizer, msgs, False))
@@ -127,13 +129,13 @@ def encode_sample(tokenizer, sample):
     for i in range(n):
         labels[i] = -100
     if all(x == -100 for x in labels):
-        return None                      # пустой ответ — не учим
+        return None                      # empty answer — nothing to learn
 
     return {"input_ids": full, "labels": labels, "prompt_len": n}
 
 
 # ---------------------------------------------------------------------------
-# МОДЕЛЬ
+# MODEL
 # ---------------------------------------------------------------------------
 
 def load_base_model(name):
@@ -145,7 +147,7 @@ def load_base_model(name):
         # transformers < 5
         model = AutoModelForCausalLM.from_pretrained(
             name, torch_dtype=torch.bfloat16, **kwargs)
-    model.config.use_cache = False        # несовместимо с checkpointing
+    model.config.use_cache = False        # incompatible with checkpointing
     return model
 
 
@@ -164,25 +166,64 @@ def attach_lora(model, args):
 
 
 def lr_factor(step, total, warmup, floor=0.05):
-    """Линейный разогрев + косинусное затухание до floor*base_lr."""
+    """Linear warmup plus cosine decay down to floor*base_lr."""
     if step < warmup:
         return (step + 1) / max(1, warmup)
     prog = (step - warmup) / max(1, total - warmup)
     return floor + (1.0 - floor) * 0.5 * (1.0 + math.cos(math.pi * prog))
 
 
+def answer_loss(model, ids, labels, attn, chunk=128):
+    """Cross-entropy only on the answer tokens, without full-vocabulary
+    logits for the prompt.
+
+    The regular CausalLM.forward computes logits [L, vocab] at EVERY
+    position. With L=2048 and vocab=151936 that is ~600 MB in bf16, plus the
+    same amount in fp32 inside cross_entropy — it does not fit in 6 GB
+    together with the activations (confirmed by the full run: CUDA OOM).
+
+    Here:
+      1. run only the transformer (base.model) and take the hidden states;
+      2. select the positions where labels != -100 (the assistant answer)
+         and take the hidden state one position earlier — a causal model
+         predicts the next token;
+      3. compute lm_head and CE in chunks of `chunk` positions.
+
+    The result is mathematically the same as the HF masked loss: the same
+    positions, the same cross-entropy; only the order of computation differs.
+    """
+    base = model.base_model.model          # Qwen3ForCausalLM under LoRA
+    out = base.model(input_ids=ids, attention_mask=attn, use_cache=False)
+    hidden = out.last_hidden_state         # [1, L, H]
+
+    ans = (labels[0] != -100).nonzero(as_tuple=False).flatten()
+    ans = ans[ans > 0]                     # the first token has no previous one
+    if ans.numel() == 0:
+        return None
+
+    total, n = 0.0, 0
+    for pos in ans.split(chunk):
+        h = hidden[0].index_select(0, pos - 1)
+        logits = base.lm_head(h).float()
+        target = labels[0].index_select(0, pos)
+        total = total + F.cross_entropy(logits, target, reduction="sum")
+        n += pos.numel()
+    return total / n
+
+
 # ---------------------------------------------------------------------------
-# ОБУЧЕНИЕ
+# TRAINING
 # ---------------------------------------------------------------------------
 
 def main():
-    ap = argparse.ArgumentParser(description="LoRA SFT asm -> C")
+    ap = argparse.ArgumentParser(description="LoRA SFT for asm -> C")
     ap.add_argument("--model", default="Qwen/Qwen3-0.6B")
     ap.add_argument("--train", default=TRAIN_PATH)
     ap.add_argument("--out-dir", default=OUT_DIR)
     ap.add_argument("--tag", default="run")
     ap.add_argument("--limit", type=int, default=0,
-                    help="взять первых N ПОДХОДЯЩИХ пар (после фильтра длины)")
+                    help="take the first N SUITABLE pairs (after the length "
+                         "filter)")
     ap.add_argument("--epochs", type=int, default=2)
     ap.add_argument("--max-seq-len", type=int, default=2048)
     ap.add_argument("--grad-accum", type=int, default=8)
@@ -193,10 +234,13 @@ def main():
     ap.add_argument("--lora-dropout", type=float, default=0.05)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--log-every", type=int, default=5)
+    ap.add_argument("--loss-chunk", type=int, default=128,
+                    help="how many answer positions to process at once in "
+                         "answer_loss")
     args = ap.parse_args()
 
     if not os.path.exists(args.train):
-        print(f"нет файла {args.train}: сначала запусти build_dataset.py",
+        print(f"no such file {args.train}: run build_dataset.py first",
               file=sys.stderr)
         sys.exit(3)
 
@@ -207,9 +251,9 @@ def main():
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    # ---- фильтр по длине: не влезающие пары пропускаем, а не обрезаем
-    # (обрезать листинг слева — значит сломать вход; обрезать ответ —
-    # значит учить модель на недописанном C)
+    # ---- length filter: skip pairs that do not fit instead of truncating
+    # (truncating the listing from the left breaks the input; truncating the
+    # answer teaches the model on incomplete C)
     rows = load_rows(args.train)
     data, skipped_long, skipped_empty, lengths = [], 0, 0, []
     for row in rows:
@@ -226,14 +270,15 @@ def main():
             break
 
     if not data:
-        print("после фильтра не осталось ни одной пары "
+        print("no pairs left after filtering "
               f"(max_seq_len={args.max_seq_len})", file=sys.stderr)
         sys.exit(3)
 
     lengths.sort()
-    print(f"пар в файле: {len(rows)}; взято: {len(data)}; "
-          f"длиннее лимита: {skipped_long}; пустой ответ: {skipped_empty}")
-    print(f"токены (все): p50={lengths[len(lengths)//2]}, "
+    print(f"pairs in file: {len(rows)}; used: {len(data)}; "
+          f"longer than the limit: {skipped_long}; empty answer: "
+          f"{skipped_empty}")
+    print(f"tokens (all): p50={lengths[len(lengths)//2]}, "
           f"p90={lengths[int(len(lengths)*0.9)]}, max={lengths[-1]}")
     print(f"max_seq_len={args.max_seq_len}, LoRA r={args.lora_r}, "
           f"lr={args.lr}, epochs={args.epochs}, "
@@ -274,8 +319,9 @@ def main():
                                   device=device)
             attn = torch.ones_like(ids)
 
-            out = model(input_ids=ids, attention_mask=attn, labels=labels)
-            loss = out.loss
+            loss = answer_loss(model, ids, labels, attn, args.loss_chunk)
+            if loss is None:
+                continue
             (loss / args.grad_accum).backward()
 
             running_loss += loss.item()
@@ -303,11 +349,11 @@ def main():
                           f"elapsed={hist['sec']}s", flush=True)
 
         ep_sec = time.time() - ep_t0
-        print(f"--- эпоха {epoch}: loss={ep_loss / max(1, ep_n):.4f}, "
+        print(f"--- epoch {epoch}: loss={ep_loss / max(1, ep_n):.4f}, "
               f"{ep_sec:.0f}s ---", flush=True)
         ckpt = os.path.join(out_root, f"epoch-{epoch}")
         model.save_pretrained(ckpt)
-        print(f"адаптер сохранён: {ckpt}", flush=True)
+        print(f"adapter saved: {ckpt}", flush=True)
 
     final = os.path.join(out_root, "final")
     model.save_pretrained(final)
@@ -334,8 +380,8 @@ def main():
               encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
 
-    print(f"\nготово: {final}")
-    print(f"лог обучения: {os.path.join(out_root, 'train_state.json')}")
+    print(f"\ndone: {final}")
+    print(f"training log: {os.path.join(out_root, 'train_state.json')}")
 
 
 if __name__ == "__main__":

@@ -1,27 +1,27 @@
 #!/usr/bin/env python3
 """
-collector.py — бесконечный сборщик корпуса для датасета по программированию.
+collector.py — endless corpus collector for a programming dataset.
 
-Как это работает (кратко):
-  1. Скрипт бесконечной нумерации берет номер sample (0, 1, 2, ...) и
-     детерминированно превращает его в английский промпт про программирование
-     (категория × тема × язык × вариант — никакого random, поэтому после
-     перезапуска продолжается ровно с того же места, а повторы невозможны).
-  2. Отправляет промпт в Ollama API (локальный сервер, модель beam:cloud
-     через Ollama Cloud).
-  3. Сохраняет ответ построчно в dset/raw/shard_NNNNN.jsonl и сразу
-     "заливает" файл на диск (flush + fsync), чтобы при отключении
-     питания не потерять.
-  4. Обновляет state.json (чекпоинт) атомарной записью.
+How it works (briefly):
+  1. The infinite numbering script takes a sample number (0, 1, 2, ...) and
+     deterministically turns it into an English programming prompt
+     (category × topic × language × variation — no randomness, so after a
+     restart it resumes exactly where it left off, and duplicates are impossible).
+  2. Sends the prompt to the Ollama API (local server, beam:cloud model
+     via Ollama Cloud).
+  3. Saves the response line by line to dset/raw/shard_NNNNN.jsonl and
+     immediately flushes the file to disk (flush + fsync) so nothing is lost
+     on a power failure.
+  4. Updates state.json (the checkpoint) with an atomic write.
 
-Программа НИКОГДА не выходит сама: при любой ошибке (нет интернета,
-сервер не отвечает, модель недоступна) она ждет и пробует снова.
-Скрипт можно убивать в любой момент и просто запустить заново командой run.sh.
+The program NEVER exits on its own: on any error (no internet, server not
+responding, model unavailable) it waits and tries again. The script can be
+killed at any moment and simply restarted with run.sh.
 
-Запуск:  bash run.sh          (фоновый режим, см. run.sh)
-Разово:  python3 collector.py --once     (один sample, для проверки связи)
-         python3 collector.py --dry-run 5  (показать 5 промптов без сети)
-         python3 collector.py --status    (показать чекпоинт)
+Run:      bash run.sh          (background mode, see run.sh)
+One-off:  python3 collector.py --once     (one sample, to check connectivity)
+          python3 collector.py --dry-run 5  (show 5 prompts without network)
+          python3 collector.py --status    (show the checkpoint)
 """
 
 import argparse
@@ -38,37 +38,37 @@ import time
 import requests
 
 # ---------------------------------------------------------------------------
-# НАСТРОЙКИ (можно менять прямо здесь)
+# SETTINGS (can be changed right here)
 # ---------------------------------------------------------------------------
 
-MODEL = "beam:cloud"                # модель Ollama Cloud
-HOST = "http://localhost:11434"     # адрес локального сервера Ollama
+MODEL = "beam:cloud"                # Ollama Cloud model
+HOST = "http://localhost:11434"     # local Ollama server address
 SYSTEM_PROMPT = (
     "You are an expert programmer. Answer in English. "
     "Be practical: always show working, idiomatic code in fenced code blocks "
     "and explain it clearly."
 )
-TEMP_RANGE = (0.6, 0.95)   # температура выбирается случайно на каждый запрос:
-                           # так меньше шанс "ходить по кругу" (mode collapse)
-JITTER = (0.0, 1.5)        # случайная добавка к паузе — трафик живее и меньше
-                           # похож на машинную долбёжку (анти-абьюз защита)
-REQUEST_TIMEOUT = 900   # секунд ожидания одного ответа (облачные модели медленные)
-PAUSE = 2.0          # пауза между запросами, секунд
-MAX_SHARD_BYTES = 8 * 1024 * 1024   # разрезаем корпус на файлы по ~8 МБ
-MAX_BACKOFF = 3600.0  # после серии ошибок ждем не дольше 1 часа
-STATE_EVERY_SECONDS = 60  # обновлять метки времени в чекпоинте не чаще чем раз в минуту
+TEMP_RANGE = (0.6, 0.95)   # temperature is chosen randomly for each request:
+                           # this reduces the chance of "going in circles" (mode collapse)
+JITTER = (0.0, 1.5)        # random addition to the pause — traffic is livelier and less
+                           # like machine hammering (anti-abuse protection)
+REQUEST_TIMEOUT = 900   # seconds to wait for one response (cloud models are slow)
+PAUSE = 2.0          # pause between requests, seconds
+MAX_SHARD_BYTES = 8 * 1024 * 1024   # split the corpus into files of ~8 MB
+MAX_BACKOFF = 3600.0  # after a series of errors, wait no longer than 1 hour
+STATE_EVERY_SECONDS = 60  # update checkpoint timestamps no more than once a minute
 
-# Пути — всё внутри папки dset/, относительно самого скрипта.
+# Paths — everything inside the dset/ folder, relative to the script itself.
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-RAW_DIR = os.path.join(BASE_DIR, "raw")          # сюда падают ответы (по кускам)
-STATE_PATH = os.path.join(BASE_DIR, "state.json")  # чекпоинт
+RAW_DIR = os.path.join(BASE_DIR, "raw")          # responses land here (in chunks)
+STATE_PATH = os.path.join(BASE_DIR, "state.json")  # checkpoint
 LOG_PATH = os.path.join(BASE_DIR, "collector.log")
 
 # ---------------------------------------------------------------------------
-# ГЕНЕРАЦИЯ ПРОМПТОВ
+# PROMPT GENERATION
 # ---------------------------------------------------------------------------
 
-# Темы — общие для всех языков программирования (на английском).
+# Topics — shared by all programming languages (in English).
 TOPICS = [
     "variables and data types", "lists and arrays", "dictionaries and hash maps",
     "sets", "strings and text processing", "regular expressions", "file reading and writing",
@@ -109,14 +109,14 @@ TOPICS = [
     "immutable data structures", "command line tools", "build tooling",
     "version control basics", "code review practice", "reading other people's code",
 ]
-TOPICS = sorted(set(TOPICS))  # убираем дубли и фиксируем порядок
+TOPICS = sorted(set(TOPICS))  # remove duplicates and fix the order
 
 LANGS = [
     "Python", "JavaScript", "TypeScript", "Go", "Rust", "C", "C++", "Java",
     "C#", "Kotlin", "Swift", "Ruby", "PHP", "Bash (shell script)", "SQL",
 ]
 
-# Варианты формулировки — добавляют разнообразие, не меняя смысл.
+# Wording variations — add diversity without changing the meaning.
 VARIATIONS = [
     "Give a thorough answer.", "Keep it concise but complete.",
     "Focus on best practices.", "Focus on common mistakes to avoid.",
@@ -126,8 +126,8 @@ VARIATIONS = [
 ]
 
 # ---------------------------------------------------------------------------
-# Категории: (имя, функция(тема, язык, вариант) -> текст промпта)
-# Порядок в списках фиксированный — он важен для детерминизма чекпоинта.
+# Categories: (name, function(topic, language, variation) -> prompt text)
+# The order in the lists is fixed — it matters for checkpoint determinism.
 
 def c_explain(topic, lang, var):
     return (f"Explain how {topic} works in {lang}: the idea, the syntax, and "
@@ -154,7 +154,7 @@ def c_edge(topic, lang, var):
     return (f"What edge cases must be handled when using {topic} in {lang}? "
             f"Show code examples for each case. {var}")
 
-# Порядок в списках фиксированный — он важен для детерминизма чекпоинта.
+# The order in the lists is fixed — it matters for checkpoint determinism.
 def c_impl(topic, lang, var):
     return (f"Implement {topic} in {lang}. Show a complete, runnable example. {var}")
 
@@ -171,16 +171,16 @@ NCAT = len(CATEGORIES)
 NTOP = len(TOPICS)
 NLANG = len(LANGS)
 NVAR = len(VARIATIONS)
-COMBO = NCAT * NTOP * NLANG * NVAR   # сколько уникальных промптов существует
+COMBO = NCAT * NTOP * NLANG * NVAR   # how many unique prompts exist
 
 
 def prompt_for(index):
-    """Детерминированно превращает номер sample в (категория, язык, промпт).
+    """Deterministically turns a sample number into (category, language, prompt).
 
-    Деление с остатком раскладывает index по слоям: категория меняется чаще
-    всего, затем тема, затем язык, затем вариант формулировки. Один и тот же
-    index всегда даёт один и тот же промпт — поэтому возобновление после
-    перезапуска работает без повторов и пропусков.
+    Division with remainder decomposes index into layers: category changes most
+    often, then topic, then language, then wording variation. The same index
+    always yields the same prompt — so resuming after a restart works without
+    duplicates or gaps.
     """
     cat_i = index % NCAT
     rest = index // NCAT
@@ -196,7 +196,7 @@ def prompt_for(index):
 
 
 # ---------------------------------------------------------------------------
-# ЧЕКПОИНТ
+# CHECKPOINT
 # ---------------------------------------------------------------------------
 
 def now_iso():
@@ -204,14 +204,14 @@ def now_iso():
 
 
 def load_state():
-    """Читает чекпоинт. Если файла нет (первый запуск) — стартуем с нуля."""
+    """Reads the checkpoint. If the file is absent (first run) — start from scratch."""
     if os.path.exists(STATE_PATH):
         with open(STATE_PATH, "r", encoding="utf-8") as f:
             return json.load(f)
     return {
         "version": 1,
-        "prompt_index": 0,     # следующий sample, который надо сгенерировать
-        "shard_num": 1,        # номер текущего файла с данными (raw/shard_N.jsonl)
+        "prompt_index": 0,     # next sample to generate
+        "shard_num": 1,        # current data file number (raw/shard_N.jsonl)
         "samples_ok": 0,
         "samples_failed": 0,
         "consecutive_errors": 0,
@@ -222,23 +222,23 @@ def load_state():
 
 
 def save_state(state):
-    """Атомарная запись чекпоинта: пишем во временный файл и переименовываем.
+    """Atomic checkpoint write: write to a temporary file and rename.
 
-    Rename поверх существующего файла на Linux — одна атомарная операция,
-    поэтому даже при отключении питания state.json окажется либо старым,
-    либо новым, но никогда не битым.
+    Rename over an existing file on Linux is a single atomic operation,
+    so even on a power failure state.json will be either the old one or
+    the new one, but never corrupted.
     """
     state["updated_at"] = now_iso()
     tmp = STATE_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
         f.flush()
-        os.fsync(f.fileno())  # принудительно сбрасываем данные на диск
+        os.fsync(f.fileno())  # force the data out to disk
     os.replace(tmp, STATE_PATH)
 
 
 # ---------------------------------------------------------------------------
-# ЗАПИСЬ ОТВЕТОВ
+# WRITING RESPONSES
 # ---------------------------------------------------------------------------
 
 def shard_path(shard_num):
@@ -246,9 +246,9 @@ def shard_path(shard_num):
 
 
 def repair_last_line(path):
-    """Если последний кусок файла не заканчивается \\n (обрыв при выключении
-    питания между записью и fsync) — обрезаем его до последней целой строки.
-    Битая половина строки — единственно возможное повреждение JSONL."""
+    """If the last chunk of the file does not end with \\n (an interruption at
+    power loss between the write and fsync) — truncate it to the last complete
+    line. A broken half-line is the only possible kind of JSONL corruption."""
     if not os.path.exists(path) or os.path.getsize(path) == 0:
         return
     with open(path, "rb") as f:
@@ -261,45 +261,46 @@ def repair_last_line(path):
         f.seek(max(0, size - tail))
         data = f.read()
     cut = data.rfind(b"\n")
-    if cut == -1:      # в хвосте вообще нет перевода строки — файл целиком битый
+    if cut == -1:      # there is no newline in the tail at all — the whole file is broken
         keep = 0
-    else:              # оставляем всё до последнего перевода строки включительно
+    else:              # keep everything up to and including the last newline
         keep = size - (len(data) - (cut + 1))
     with open(path, "r+b") as f:
         f.truncate(keep)
 
 
 def append_sample(shard_num, record):
-    """Добавляет одну запись в текущий шард. Возвращает размер файла после записи."""
+    """Appends one record to the current shard. Returns the file size after writing."""
     path = shard_path(shard_num)
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
         f.flush()
-        os.fsync(f.fileno())  # принудительный сброс на диск: данных не теряем
+        os.fsync(f.fileno())  # force flush to disk: we do not lose data
     return os.path.getsize(path)
 
 
 # ---------------------------------------------------------------------------
-# ЗАПРОС К OLLAMA
+# OLLAMA REQUEST
 # ---------------------------------------------------------------------------
 
 def validate_python_blocks(response):
-    """Проверяет синтаксис ВСЕХ code-блоков ответа (```python) через ast.parse —
-    модуль Python, который разбирает исходник в синтаксическое дерево: если текст
-    не разбирается, код заведомо битый. Возвращает (все_ли_блоки_ок, первая_ошибка)."""
+    """Checks the syntax of ALL code blocks in the response (```python) via
+    ast.parse — the Python module that parses source into a syntax tree: if the
+    text does not parse, the code is definitely broken. Returns (all_blocks_ok,
+    first_error)."""
     blocks = re.findall(r"```(?:python|py)?[^\n]*\n(.*?)```", response, re.S)
     for i, code in enumerate(blocks, 1):
         try:
             ast.parse(code)
         except SyntaxError as e:
-            return False, f"блок {i}: {e.msg} (строка {e.lineno})"
+            return False, f"block {i}: {e.msg} (line {e.lineno})"
     return True, None
 
 
 def ask_ollama(prompt, temperature):
-    """Один запрос к /api/chat. Возвращает (текст ответа, количество токенов).
+    """One request to /api/chat. Returns (response text, token count).
 
-    При проблеме — кидает исключение, вызывающий код решает, что делать.
+    On a problem — raises an exception; the caller decides what to do.
     """
     payload = {
         "model": MODEL,
@@ -316,12 +317,12 @@ def ask_ollama(prompt, temperature):
     data = r.json()
     content = data.get("message", {}).get("content", "")
     if not content:
-        raise RuntimeError(f"пустой ответ от модели: keys={list(data.keys())}")
+        raise RuntimeError(f"empty response from model: keys={list(data.keys())}")
     return content, data.get("eval_count", 0)
 
 
 # ---------------------------------------------------------------------------
-# ОСНОВНОЙ ЦИКЛ
+# MAIN LOOP
 # ---------------------------------------------------------------------------
 
 def log(msg):
@@ -332,10 +333,10 @@ def log(msg):
 
 
 def do_one(index, state):
-    """Генерирует и сохраняет один sample. Возвращает True при успехе."""
+    """Generates and saves one sample. Returns True on success."""
     category, lang, prompt = prompt_for(index)
     temperature = random.uniform(*TEMP_RANGE)
-    log(f"#{index} [{category}/{lang}] запрос (t={temperature:.2f})...")
+    log(f"#{index} [{category}/{lang}] request (t={temperature:.2f})...")
     try:
         response, tokens = ask_ollama(prompt, temperature)
     except requests.HTTPError as e:
@@ -343,25 +344,25 @@ def do_one(index, state):
         state["consecutive_errors"] += 1
         err = "?"
         if e.response is not None:
-            # 429 Too Many Requests / 503: если сервер прислала Retry-After —
-            # сколько секунд он просит подождать, учтём это в цикле ниже
+            # 429 Too Many Requests / 503: if the server sent Retry-After —
+            # how many seconds it asks to wait — we take that into account below
             err = f"HTTP {e.response.status_code}"
             ra = e.response.headers.get("retry-after")
             if ra:
                 state["min_backoff"] = float(ra)
-                err += f", Retry-After={float(ra):.0f}с"
+                err += f", Retry-After={float(ra):.0f}s"
         state["last_error"] = err
-        log(f"#{index} ОШИБКА: {err}")
+        log(f"#{index} ERROR: {err}")
         return False
     except Exception as e:
         state["samples_failed"] += 1
         state["consecutive_errors"] += 1
         state["last_error"] = f"{type(e).__name__}: {e}"
-        log(f"#{index} ОШИБКА: {state['last_error']}")
+        log(f"#{index} ERROR: {state['last_error']}")
         return False
 
-    # Проверка синтаксиса: только для Python (для других языков парсера под рукой нет).
-    # Не выбрасываем, а помечаем — решение "хранить/фильтровать" отложено в build_dataset.
+    # Syntax check: Python only (no parser at hand for other languages).
+    # Do not discard, just mark — the "store/filter" decision is deferred to build_dataset.
     if lang == "Python":
         code_ok, code_err = validate_python_blocks(response)
     else:
@@ -388,19 +389,19 @@ def do_one(index, state):
     state["samples_ok"] += 1
     state["consecutive_errors"] = 0
     state["last_error"] = None
-    state["min_backoff"] = None    # сервер больше не просит ждать — сбрасываем
-    if size >= MAX_SHARD_BYTES:   # файл вырос — начинаем следующий
+    state["min_backoff"] = None    # the server no longer asks us to wait — reset it
+    if size >= MAX_SHARD_BYTES:   # the file grew — start the next one
         state["shard_num"] += 1
     save_state(state)
-    code_note = "код ok" if code_ok else f"КОД БИТЫЙ ({code_err})"
-    log(f"#{index} OK ({tokens} токенов, t={temperature:.2f}, {code_note}, "
-        f"сохранено в shard_{saved_shard:05d}.jsonl)")
+    code_note = "code ok" if code_ok else f"BROKEN CODE ({code_err})"
+    log(f"#{index} OK ({tokens} tokens, t={temperature:.2f}, {code_note}, "
+        f"saved to shard_{saved_shard:05d}.jsonl)")
     return True
 
 
 def run_forever(state):
-    log(f"=== старт/возобновление: продолжаю с sample #{state['prompt_index']}, "
-        f"комбинаций промптов всего {COMBO} ===")
+    log(f"=== start/resume: continuing from sample #{state['prompt_index']}, "
+        f"total prompt combinations {COMBO} ===")
     backoff = 5.0
     last_state_ts = time.time()
     while True:
@@ -408,11 +409,11 @@ def run_forever(state):
             backoff = 5.0
             wait = PAUSE + random.uniform(*JITTER)
         else:
-            # экспоненциальный backoff: 5с, 10с, 20с ... до 1 часа;
-            # если сервер ответил Retry-After — ждём не меньше его
+            # exponential backoff: 5s, 10s, 20s ... up to 1 hour;
+            # if the server replied with Retry-After — wait at least that long
             backoff = min(backoff * 2, MAX_BACKOFF)
             wait = max(backoff, state.get("min_backoff") or 0)
-            log(f"жду {wait:.0f}с перед повтором")
+            log(f"waiting {wait:.0f}s before retry")
         if time.time() - last_state_ts > STATE_EVERY_SECONDS:
             save_state(state)
             last_state_ts = time.time()
@@ -420,12 +421,12 @@ def run_forever(state):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Сборщик корпуса через Ollama Cloud")
+    parser = argparse.ArgumentParser(description="Corpus collector via Ollama Cloud")
     parser.add_argument("--once", action="store_true",
-                        help="сделать ровно один sample и выйти (проверка связи)")
+                        help="generate exactly one sample and exit (connectivity check)")
     parser.add_argument("--dry-run", type=int, default=0, metavar="N",
-                        help="показать первые N промптов и выйти (без сети)")
-    parser.add_argument("--status", action="store_true", help="показать чекпоинт и выйти")
+                        help="show the first N prompts and exit (no network)")
+    parser.add_argument("--status", action="store_true", help="show the checkpoint and exit")
     args = parser.parse_args()
 
     os.makedirs(RAW_DIR, exist_ok=True)
@@ -442,10 +443,10 @@ def main():
 
     state = load_state()
 
-    # Аккуратное завершение по Ctrl+C и по `kill` (systemd и т.п.): чекпоинт и так
-    # сохраняется после каждого sample, поэтому тут достаточно просто выйти.
+    # Graceful shutdown on Ctrl+C and on `kill` (systemd etc.): the checkpoint is
+    # already saved after every sample, so here it is enough to simply exit.
     def on_term(_sig, _frm):
-        log("получен сигнал остановки — выхожу")
+        log("stop signal received — exiting")
         sys.exit(0)
     signal.signal(signal.SIGTERM, on_term)
 
@@ -456,7 +457,7 @@ def main():
             sys.exit(0 if ok else 1)
         run_forever(state)
     except KeyboardInterrupt:
-        log("остановлено (Ctrl+C) — прогресс сохранён")
+        log("stopped (Ctrl+C) — progress saved")
 
 
 if __name__ == "__main__":

@@ -42,6 +42,12 @@ model answer (C) ──► difftest.py: original C vs predicted C ──► verd
 - `eval.py` — evaluates a local model (base or LoRA-tuned) on `val.jsonl`:
   greedy generation, C extraction, `difftest` check, `compile_rate` and
   `pass_rate`; writes predictions and a summary JSON.
+- `train.py` — LoRA SFT of Qwen3-0.6B on `train.jsonl`. The loss is computed
+  only on the assistant's C answer: prompt and listing tokens are masked with
+  `-100`, so the model learns reconstruction instead of copying the prompt.
+  Pairs longer than `--max-seq-len` are skipped, not truncated.
+- `plot_training.py` — renders the training-loss figure in `docs/` (light and
+  dark PNG) from `train_state.json` or directly from a training log.
 - `verifier.py` — runner/checker for line B asm programs: x86-64, AT&T syntax,
   entry point `_start`, no libc, I/O only through `read(0)` / `write(1)`
   syscalls. Exit codes: `0` all tests pass, `1` assembled but tests failed,
@@ -50,6 +56,8 @@ model answer (C) ──► difftest.py: original C vs predicted C ──► verd
   `infinite.s`).
 - `raw_c/` — output shards of `gen_c.py` (runtime data).
 - `dataset/` — built `train.jsonl`, `val.jsonl`, `stats.json` (runtime data).
+- `checkpoints/` — LoRA adapters and `train_state.json` (runtime data).
+- `docs/` — figures used by this README.
 - `state_gen_c.json`, `gen_c.log`, `gen_c.out`, `gen_c.pid` — checkpoint, log,
   wrapper output and pid file of the running collector (runtime data).
 
@@ -153,6 +161,28 @@ outputs are always taken from the reference, never from the file.
 CLI exit codes: `0` all inputs matched, `1` behavior mismatch,
 `2` candidate failed to compile, `3` bad input.
 
+## Training
+
+`train.py` fine-tunes Qwen3-0.6B with a LoRA adapter on `dataset/train.jsonl`.
+Only the adapter is trained (10.1M of 606M parameters, 1.67%); the base weights
+stay frozen in bf16. The loss is computed only on the assistant's C answer:
+labels for the system prompt, the user question and the assembly listing are
+set to `-100`, which cross-entropy ignores.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/training_loss_dark.png">
+  <img src="docs/training_loss_light.png"
+       alt="Training loss on assistant tokens for the smoke run: 1.38 at the first step, 0.12 at the last, over 45 optimizer steps"
+       width="840">
+</picture>
+
+The figure is the **smoke run** used to validate the pipeline: 60 short pairs,
+3 epochs, 45 optimizer steps. Loss falls from 1.38 at the first step to 0.12
+at the last (epoch averages: 0.86, 0.41, 0.21). On the validation set the
+adapter then answers with C code in all 16 cases (the base model sometimes
+copies the listing into a `c` block instead), while functional correctness
+still requires training on the full dataset.
+
 ## Usage
 
 ```bash
@@ -178,6 +208,17 @@ python3 difftest.py ref.c cand.c --json                # machine-readable
 python3 eval.py --model Qwen/Qwen3-0.6B                # baseline
 python3 eval.py --model Qwen/Qwen3-0.6B --adapter checkpoints/lora --tag lora
 python3 eval.py --model Qwen/Qwen3-0.6B --limit 5     # quick smoke run
+
+# training
+python3 train.py --limit 60 --epochs 3 --max-seq-len 1024 \
+    --grad-accum 4 --tag smoke                        # smoke overfit
+python3 train.py --epochs 2 --max-seq-len 2048 \
+    --grad-accum 8 --tag full                         # full run
+
+# training-loss figure for this README
+python3 plot_training.py
+python3 plot_training.py --state checkpoints/lora-full/train_state.json \
+    --stem training_loss_full
 
 # line B asm programs
 python3 verifier.py prog.s --tests prog.test.json

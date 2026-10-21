@@ -1,30 +1,30 @@
 #!/usr/bin/env python3
 """
-verifier.py — проверяет asm-программы для датасета C→ASM.
+verifier.py — verifies asm programs for the C→ASM dataset.
 
-Контракт программы (обязателен для всех задач датасета):
-  - архитектура x86-64, синтаксис AT&T (как выдаёт `gcc -S`);
-  - точка входа `_start`, завершение — syscall `exit`;
-  - никакого libc (printf/scanf и т.п.): ввод/вывод только syscalls
-    read(0) / write(1).
+Program contract (mandatory for all dataset tasks):
+  - x86-64 architecture, AT&T syntax (as emitted by `gcc -S`);
+  - entry point `_start`, termination via the `exit` syscall;
+  - no libc (printf/scanf and the like): input/output only through the
+    read(0) / write(1) syscalls.
 
-Пайплайн:
-  1. исходник во временный каталог;
+Pipeline:
+  1. the source into a temporary directory;
   2. `as --64 prog.s -o prog.o`;
   3. `ld prog.o -o prog`;
-  4. для каждого теста прогон: (stdin → ожидаемый stdout, ожидаемый exit code),
-     с изоляцией — timeout, RLIMIT (память/CPU/core/процессы), пустое окружение;
-  5. вердикт (JSON или человекочитаемо).
+  4. for each test, a run: (stdin → expected stdout, expected exit code),
+     with isolation — timeout, RLIMIT (memory/CPU/core/processes), empty environment;
+  5. verdict (JSON or human-readable).
 
-Коды возврата CLI:
-  0 — все тесты прошли; 1 — собрался, но есть проваленные тесты;
-  2 — не собрался/не слинковался; 3 — ошибка входа (нет файла, битый JSON,
-  список тестов пуст, тесты не словарь/не список).
+CLI return codes:
+  0 — all tests passed; 1 — it built, but some tests failed;
+  2 — failed to assemble/link; 3 — input error (missing file, broken JSON,
+  empty test list, tests are not a dict/list).
 
-Про константы: таймауты НЕ ограничивают правильные программы (те работают
-за микросекунды) — они задают цену обработки битых/висящих программ.
+About the constants: timeouts do NOT constrain correct programs (those run
+in microseconds) — they set the price of handling broken/hanging programs.
 
-Запуск: python3 verifier.py prog.s --tests prog.test.json [--json]
+Usage: python3 verifier.py prog.s --tests prog.test.json [--json]
 """
 
 import argparse
@@ -35,29 +35,29 @@ import subprocess
 import sys
 import tempfile
 
-# --- константы (обоснование в README): только цены на битый трюк ---
-ASM_TIMEOUT = 5                  # сек на as/ld (реальность: десятки мс)
-RUN_TIMEOUT = 2                  # сек на один тест — налог на висящие программы
-MEM_LIMIT = 256 * 1024 * 1024    # байт адресного пространства
-CPU_LIMIT = 2                    # сек процессорного времени
-CORE_LIMIT = 0                   # core dump не писать (иначе падёжки завалят диск)
-NPROC_LIMIT = 64                 # от fork-бомб
+# --- constants (rationale in the README): only the price of a broken trick ---
+ASM_TIMEOUT = 5                  # seconds for as/ld (in practice: tens of ms)
+RUN_TIMEOUT = 2                  # seconds per test — a tax on hanging programs
+MEM_LIMIT = 256 * 1024 * 1024    # bytes of address space
+CPU_LIMIT = 2                    # seconds of CPU time
+CORE_LIMIT = 0                   # do not write core dumps (otherwise crashes would fill the disk)
+NPROC_LIMIT = 64                 # against fork bombs
 
-# Человекочитаемая расшифровка отрицательных кодов (сигналов), для датасета полезно
+# Human-readable explanation of negative codes (signals); useful for the dataset
 SIGNAL_HINTS = {
-    -11: "SIGSEGV — частая причина: возврат из _start без syscall exit, либо битое разыменование",
-    -9:  "SIGKILL — убит ядром: почти всегда наш CPU-лимит или RAM-лимит (гонка с wall-таймаутом)",
-    -4:  "SIGILL — недопустимая инструкция",
-    -8:  "SIGFPE — деление на ноль / переполнение",
+    -11: "SIGSEGV — common cause: returning from _start without the exit syscall, or a bad dereference",
+    -9:  "SIGKILL — killed by the kernel: almost always our CPU limit or RAM limit (race with the wall timeout)",
+    -4:  "SIGILL — illegal instruction",
+    -8:  "SIGFPE — division by zero / overflow",
     -7:  "SIGBUS",
 }
 
 
 def _limits():
-    """preexec_fn для subprocess: rlimits ставятся ДО запуска дочернего кода.
+    """preexec_fn for subprocess: rlimits are set BEFORE the child code runs.
 
-    preexec_fn исполняется в потомке между fork и exec; это единственное окно,
-    где можно ограничить код, которому мы ещё не доверяем."""
+    preexec_fn runs in the child between fork and exec; that is the only window
+    where we can limit code we do not trust yet."""
     for res, val in (
         (resource.RLIMIT_AS, MEM_LIMIT),
         (resource.RLIMIT_CPU, CPU_LIMIT),

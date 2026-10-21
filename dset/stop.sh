@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Остановка сборщика и его цикла автоперезапуска.
-# Данные и чекпоинт целы: после каждого sample уже всё сохранено на диск.
+# Stop the collector and its auto-restart loop.
+# Data and checkpoint are intact: everything is already saved to disk after each sample.
 
 cd "$(dirname "$0")" || exit 1
 
-# Остановить цикл авторазапуска (run.sh)
+# Stop the auto-restart loop (run.sh)
 if [ -f collector.pid ]; then
-    kill "$(cat collector.pid)" 2>/dev/null && echo "Цикл run.sh остановлен."
+    kill "$(cat collector.pid)" 2>/dev/null && echo "run.sh loop stopped."
     rm -f collector.pid
 fi
 
-# Остановить сам collector, если он ещё работал
-pkill -f "python3 collector.py" && echo "collector.py остановлен." || echo "collector.py не был запущен."
+# Stop the collector itself if it was still running
+pkill -f "python3 collector.py" && echo "collector.py stopped." || echo "collector.py was not running."

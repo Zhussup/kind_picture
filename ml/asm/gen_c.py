@@ -1,45 +1,45 @@
 #!/usr/bin/env python3
 """
-gen_c.py — сборщик НАСТОЯЩИХ пар "C → asm" для датасета (линия A1).
+gen_c.py — builds REAL "C → asm" pairs for the dataset (line A1).
 
-Идея (и почему это надёжнее, чем просить модель писать asm):
-  beam пишет C-программу, а компилятор gcc сам превращает её в asm.
-  Значит asm в паре — гарантированно корректный, "золотой" эталон:
-  его не надо проверять тестами, его создал настоящий компилятор.
-  Модель позже будет учиться именно такому asm (AT&T, x86-64).
+Idea (and why this is more reliable than asking the model to write asm):
+  beam writes a C program, and the gcc compiler turns it into asm itself.
+  So the asm in the pair is guaranteed correct, a "gold" reference:
+  it does not need to be checked with tests; a real compiler produced it.
+  The model will later learn exactly this kind of asm (AT&T, x86-64).
 
-Что делает скрипт, по шагам:
-  1. Номер sample (0, 1, 2, ...) детерминированно превращается в задачу
-     (задача × вариант формулировки; никакого random — после перезапуска
-     продолжаем ровно с того же места).
-  2. Промпт уходит в Ollama API (модель beam:cloud), ответ парсится:
-     нужен ровно один блок ```c ... ```.
-  3. Код компилируется ДВА раза: `gcc -O0 -S` и `gcc -O2 -S` — получаем
-     два листинга одной и той же программы (важно: видно, как оптимизатор
-     меняет код — это ценная часть датасета).
-  4. Одна строка JSONL на sample: C-исходник + оба листинга + пометки
-     "собралось/не собралось". Пишется с flush+fsync (переживёт отключение).
-  5. Чекпоинт state_gen_c.json обновляется атомарно.
+What the script does, step by step:
+  1. The sample number (0, 1, 2, ...) is deterministically turned into a task
+     (task × wording variation; no randomness at all — after a restart
+     we continue from exactly the same place).
+  2. The prompt goes to the Ollama API (model beam:cloud), and the response is parsed:
+     exactly one ```c ... ``` block is required.
+  3. The code is compiled TWICE: `gcc -O0 -S` and `gcc -O2 -S` — we get
+     two listings of the same program (important: you can see how the optimizer
+     changes the code — that is a valuable part of the dataset).
+  4. One JSONL line per sample: C source + both listings + flags
+     "compiled/failed to compile". Written with flush+fsync (survives a power loss).
+  5. The checkpoint state_gen_c.json is updated atomically.
 
-Формат A1 — это пары "C-источник → листинг компилятора". Тесты здесь
-НЕ прогоняются: метка качества — только "компилируется ли". Пары формата A2
-("задача → программа _start + прогон тестов через verifier.py") сюда
-специально не смешиваются — это отдельная линия B.
+Format A1 — these are "C source → compiler listing" pairs. Tests are
+NOT run here: the only quality label is "does it compile". Pairs of format A2
+("task → _start program + test run via verifier.py") are deliberately
+not mixed in here — that is a separate line B.
 
-Из листинга вырезаются три служебных вещи (для читаемости датасета):
-  - `.file "prog.c"` — имя исходника, нам не нужно;
-  - `.ident "GCC: ..."` — версия компилятора;
-  - `.section .note...` — пустые служебные секции для линкера.
-Всё остальное (включая секции .text/.data, метки, директивы) сохраняется.
-Флаг `-fno-asynchronous-unwind-tables` убирает шум .cfi-директив ещё на
-этапе компиляции, `-fverbose-asm` добавляет комментарии с именами переменных.
+Three service items are cut from the listing (for dataset readability):
+  - `.file "prog.c"` — the source file name, which we don't need;
+  - `.ident "GCC: ..."` — the compiler version;
+  - `.section .note...` — empty service sections for the linker.
+Everything else (including the .text/.data sections, labels, directives) is kept.
+The `-fno-asynchronous-unwind-tables` flag removes the .cfi directive noise at
+the compilation stage, and `-fverbose-asm` adds comments with variable names.
 
-Запуск:
-  python3 gen_c.py --once        один sample (проверка связи)
-  python3 gen_c.py --dry-run 5   показать 5 промптов без сети
-  python3 gen_c.py --status      показать чекпоинт
-  python3 gen_c.py --self-test   офлайн-проверка gcc-части (без сети)
-  python3 gen_c.py               бесконечный сбор (Ctrl+C — остановка)
+Usage:
+  python3 gen_c.py --once        one sample (connectivity check)
+  python3 gen_c.py --dry-run 5   show 5 prompts without the network
+  python3 gen_c.py --status      show the checkpoint
+  python3 gen_c.py --self-test   offline check of the gcc part (no network)
+  python3 gen_c.py               endless collection (Ctrl+C to stop)
 """
 
 import argparse
@@ -56,49 +56,49 @@ import time
 import requests
 
 # ---------------------------------------------------------------------------
-# НАСТРОЙКИ
+# SETTINGS
 # ---------------------------------------------------------------------------
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))   # .../ml/asm
-RAW_DIR = os.path.join(BASE_DIR, "raw_c")               # сюда пишутся шарды
-STATE_PATH = os.path.join(BASE_DIR, "state_gen_c.json") # чекпоинт
-LOG_PATH = os.path.join(BASE_DIR, "gen_c.log")          # лог
+RAW_DIR = os.path.join(BASE_DIR, "raw_c")               # shards are written here
+STATE_PATH = os.path.join(BASE_DIR, "state_gen_c.json") # checkpoint
+LOG_PATH = os.path.join(BASE_DIR, "gen_c.log")          # log
 
 MODEL = "beam:cloud"
-HOST = "http://localhost:11434"     # локальный демон Ollama (он держит логин)
+HOST = "http://localhost:11434"     # local Ollama daemon (it holds the login)
 
 SYSTEM_PROMPT = (
     "You are an expert C programmer. Reply with exactly one fenced code block "
     "that starts with ```c and contains the complete program. "
     "No explanations, no prose outside the block."
 )
-TEMP_RANGE = (0.6, 0.95)   # случайная температура на запрос — меньше повторов
-JITTER = (0.0, 1.5)        # случайная добавка к паузе (анти-долбёжка)
-REQUEST_TIMEOUT = 900      # сек на один ответ модели
-PAUSE = 2.0                # пауза между запросами, сек
-MAX_SHARD_BYTES = 8 * 1024 * 1024   # новый шард после ~8 МБ
-MAX_BACKOFF = 3600.0       # максимум ожидания после серии сетевых ошибок
-STATE_EVERY_SECONDS = 60   # как часто обновлять чекпоинт "на всякий случай"
+TEMP_RANGE = (0.6, 0.95)   # random temperature per request — fewer repeats
+JITTER = (0.0, 1.5)        # random addition to the pause (anti-hammering)
+REQUEST_TIMEOUT = 900      # seconds for one model response
+PAUSE = 2.0                # pause between requests, seconds
+MAX_SHARD_BYTES = 8 * 1024 * 1024   # new shard after ~8 MB
+MAX_BACKOFF = 3600.0       # maximum wait after a series of network errors
+STATE_EVERY_SECONDS = 60   # how often to refresh the checkpoint "just in case"
 
-GCC_TIMEOUT = 30           # сек на один запуск gcc (реальность: миллисекунды)
-MAX_EXTRACT_FAILS = 3      # столько раз пробуем один промпт, потом идём дальше
+GCC_TIMEOUT = 30           # seconds per gcc run (in practice: milliseconds)
+MAX_EXTRACT_FAILS = 3      # try one prompt this many times, then move on
 
 GCC_FLAGS = [
     "gcc", "-std=c11", "-Wall", "-Wextra", "-pedantic",
-    "-fno-asynchronous-unwind-tables",   # без .cfi-шума в листинге
-    "-fverbose-asm",                     # комментарии с именами переменных
+    "-fno-asynchronous-unwind-tables",   # no .cfi noise in the listing
+    "-fverbose-asm",                     # comments with variable names
 ]
 
 # ---------------------------------------------------------------------------
-# ПРОСТРАНСТВО ЗАДАЧ
+# TASK SPACE
 # ---------------------------------------------------------------------------
-# Каждая строка — продолжение фразы "Write a complete C program that ...".
-# Промпт детерминированный: index -> (задача, вариант формулировки).
-# После исчерпания COMBO промпты повторяются, но ответы будут другими
-# (температура случайна). Задачи легко дописывать — просто добавь строку.
+# Each line continues the phrase "Write a complete C program that ...".
+# The prompt is deterministic: index -> (task, wording variation).
+# Once COMBO is exhausted the prompts repeat, but the answers will differ
+# (the temperature is random). Tasks are easy to extend — just add a line.
 
 TASKS = [
-    # --- числа ---
+    # --- numbers ---
     "reads one integer n and prints n factorial (n <= 12) using a loop",
     "reads two integers a and b and prints their greatest common divisor via Euclid's algorithm",
     "reads one integer n and prints the n-th Fibonacci number using an iterative loop",
@@ -115,7 +115,7 @@ TASKS = [
     "reads two integers a and b and prints a^b for small b using a loop",
     "reads one integer n and prints whether it is a perfect square using only integer arithmetic",
     "reads one integer n and prints the largest power of two not exceeding n",
-    # --- строки ---
+    # --- strings ---
     "reads one line and prints it reversed",
     "reads one line and prints 1 if it is a palindrome ignoring spaces, otherwise 0",
     "reads one line and prints the number of vowels (a, e, i, o, u, case-insensitive)",
@@ -132,7 +132,7 @@ TASKS = [
     "reads one integer in decimal and prints it in lowercase hexadecimal without the 0x prefix",
     "reads one line and converts its words to uppercase without toupper, using ASCII arithmetic",
     "reads one long line and prints 1 if it contains only digits, otherwise 0",
-    # --- массивы ---
+    # --- arrays ---
     "reads n then n integers, sorts them ascending with bubble sort, and prints them space-separated",
     "reads n then n integers, sorts them ascending with insertion sort, and prints them space-separated",
     "reads n then n integers, sorts them ascending with selection sort, and prints them space-separated",
@@ -153,7 +153,7 @@ TASKS = [
     "reads n then n integers and prints the longest strictly increasing subsequence length (O(n^2) DP)",
     "reads n then n integers and prints the maximum subarray sum (Kadane's algorithm)",
     "reads n, a capacity C, then n item weights, and prints the maximum number of items that fit",
-    # --- указатели, структуры, память ---
+    # --- pointers, structs, memory ---
     "reads n then n integers into a malloc'd array that grows by doubling, prints the sum and frees everything",
     "defines struct Point { int x; int y; }, reads two points, and prints their squared distance",
     "defines struct Complex { double re; double im; }, reads two complex numbers, and prints their product",
@@ -163,7 +163,7 @@ TASKS = [
     "implements a fixed-size int stack on an array of 100 elements driven by commands: p number (push), o (pop and print), q (quit)",
     "implements an int queue with a ring buffer of 100 elements driven by commands: e number (enqueue), d (dequeue and print), q (quit)",
     "reads one line and stores it in a singly linked list of characters, prints it back, and frees every node",
-    # --- алгоритмы ---
+    # --- algorithms ---
     "reads an RPN expression of single-digit numbers and + - * / operators from one line and prints the integer result using an array stack",
     "reads a line of simple additions and subtractions of integers like '3+4-2' and prints the result without using strtol",
     "reads one line of lowercase words and prints them sorted with qsort and a custom comparator",
@@ -199,11 +199,11 @@ FENCE_ANY = re.compile(r"```[^\n]*\n(.*?)```", re.S)
 
 
 # ---------------------------------------------------------------------------
-# ПРОМПТЫ
+# PROMPTS
 # ---------------------------------------------------------------------------
 
 def prompt_for(index):
-    """index -> (задача, вариант, текст промпта). Детерминированно."""
+    """index -> (task, variation, prompt text). Deterministic."""
     task_i = index % len(TASKS)
     var_i = (index // len(TASKS)) % len(VARIATIONS)
     task, variation = TASKS[task_i], VARIATIONS[var_i]
@@ -216,8 +216,8 @@ def prompt_for(index):
 
 
 def extract_c(response):
-    """Достаёт C-код из ответа: сначала ищем блок ```c, потом любой ```.
-    Если блоков несколько — берём самый длинный. Нет блоков — None."""
+    """Extracts C code from the response: first look for a ```c block, then any ```.
+    If there are several blocks, take the longest one. No blocks — None."""
     blocks = FENCE_C.findall(response)
     if not blocks:
         blocks = FENCE_ANY.findall(response)
@@ -232,15 +232,15 @@ def extract_c(response):
 # ---------------------------------------------------------------------------
 
 def clean_listing(text):
-    """Вырезает служебные строки (см. docstring модуля) и шапку компилятора.
+    """Cuts service lines (see the module docstring) and the compiler header.
 
-    Шапка — ведущие строки-комментарии `# GNU C11 ...`, `# options passed ...`:
-    это не asm, а метаданные; версию gcc пишем отдельно в поле "gcc".
-    Комментарии `# prog.c:6: ...` ВНУТРИ кода остаются — это полезная
-    привязка каждой инструкции к строке исходника."""
+    The header consists of the leading comment lines `# GNU C11 ...`, `# options passed ...`:
+    that is metadata, not asm; we record the gcc version separately in the "gcc" field.
+    The `# prog.c:6: ...` comments INSIDE the code are kept — they are a useful
+    link from each instruction to a source line."""
     kept = []
     for ln in text.splitlines():
-        # сравнение без учёта отступов: gcc пишет "\t.section\t.note..."
+        # compare ignoring indentation: gcc writes "\t.section\t.note..."
         norm = ln.lstrip().replace("\t", " ")
         if norm.startswith(DROP_PREFIXES):
             continue
@@ -251,26 +251,26 @@ def clean_listing(text):
 
 
 def compile_c(c_text, opt):
-    """Компилирует C-текст в листинг asm с уровнем оптимизации opt ('O0'/'O2').
+    """Compiles C text into an asm listing at optimization level opt ('O0'/'O2').
 
-    Возвращает dict: ok (bool), asm (str|None), diag (текст stderr, усечён).
-    Диагностика нужна не для отбраковки, а как данные: видно, что модель
-    написала код с предупреждениями — это тоже сигнал качества.
+    Returns a dict: ok (bool), asm (str|None), diag (stderr text, truncated).
+    The diagnostics are not used for rejection but as data: you can see that the
+    model wrote code with warnings — that is also a quality signal.
     """
     with tempfile.TemporaryDirectory(prefix="genc_") as workdir:
         src = os.path.join(workdir, "prog.c")
         out = os.path.join(workdir, "prog.s")
         with open(src, "w", encoding="utf-8") as f:
             f.write(c_text)
-        # имена передаём относительные, cwd=workdir: иначе gcc вписывает в
-        # комментарии абсолютный путь /tmp/genc_XXXX/prog.c — случайный мусор
+        # pass relative names with cwd=workdir: otherwise gcc writes the
+        # absolute path /tmp/genc_XXXX/prog.c into comments — random clutter
         cmd = GCC_FLAGS + [f"-{opt}", "-S", "prog.c", "-o", "prog.s"]
         try:
             p = subprocess.run(cmd, capture_output=True, text=True,
                                timeout=GCC_TIMEOUT, cwd=workdir)
         except subprocess.TimeoutExpired:
             return {"ok": False, "asm": None,
-                    "diag": f"gcc не завершился за {GCC_TIMEOUT} с"}
+                    "diag": f"gcc did not finish within {GCC_TIMEOUT} s"}
         except OSError as e:
             return {"ok": False, "asm": None,
                     "diag": f"{type(e).__name__}: {e}"}
@@ -282,12 +282,12 @@ def compile_c(c_text, opt):
                 listing = clean_listing(f.read())
         except OSError as e:
             return {"ok": False, "asm": None,
-                    "diag": f"не прочитал листинг: {e}"}
+                    "diag": f"could not read the listing: {e}"}
         return {"ok": True, "asm": listing, "diag": p.stderr.strip()[:4000]}
 
 
 # ---------------------------------------------------------------------------
-# ЧЕКПОИНТ И ФАЙЛЫ
+# CHECKPOINT AND FILES
 # ---------------------------------------------------------------------------
 
 def now_iso():
@@ -295,7 +295,7 @@ def now_iso():
 
 
 def gcc_version():
-    """Версия gcc — для провенанса датасета (шапка листинга теперь удаляется)."""
+    """gcc version — for dataset provenance (the listing header is now removed)."""
     try:
         p = subprocess.run(["gcc", "-dumpfullversion"], capture_output=True,
                            text=True, timeout=5)
@@ -310,14 +310,14 @@ GCC_VERSION = gcc_version()
 def default_state():
     return {
         "version": 1,
-        "prompt_index": 0,       # номер следующего sample
-        "shard_num": 1,          # текущий файл raw_c/shard_NNNNN.jsonl
+        "prompt_index": 0,       # number of the next sample
+        "shard_num": 1,          # current file raw_c/shard_NNNNN.jsonl
         "samples_ok": 0,
-        "samples_no_c": 0,       # ответ без C-блока (после MAX_EXTRACT_FAILS)
-        "samples_bad_c": 0,      # C есть, но gcc не собрал ни -O0, ни -O2
-        "extract_fails": 0,      # неудачных попыток для текущего index
+        "samples_no_c": 0,       # response without a C block (after MAX_EXTRACT_FAILS)
+        "samples_bad_c": 0,      # C is present, but gcc compiled neither -O0 nor -O2
+        "extract_fails": 0,      # failed attempts for the current index
         "consecutive_errors": 0,
-        "min_backoff": None,     # сколько сервер просил подождать (Retry-After)
+        "min_backoff": None,     # how long the server asked to wait (Retry-After)
         "last_error": None,
         "started_at": None,
         "updated_at": None,
@@ -337,8 +337,8 @@ def load_state():
 
 
 def save_state(state):
-    """Атомарная запись: tmp-файл + os.replace + fsync.
-    Так на диске всегда либо старая целая версия, либо новая целая."""
+    """Atomic write: tmp file + os.replace + fsync.
+    That way the disk always holds either the old intact version or the new intact one."""
     state["updated_at"] = now_iso()
     tmp = STATE_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
@@ -358,8 +358,8 @@ def shard_path(n):
 
 
 def repair_last_line(path):
-    """После аварии последняя строка шарда может быть недописана.
-    Обрезаем файл до последнего завершённого \\n."""
+    """After a crash the last line of a shard may be partially written.
+    We truncate the file to the last completed \\n."""
     if not os.path.exists(path):
         return
     with open(path, "rb+") as f:
@@ -371,7 +371,7 @@ def repair_last_line(path):
 
 
 def append_sample(shard_num, record):
-    """Дописывает одну строку JSONL и сбрасывает её на диск. Возвращает размер."""
+    """Appends one JSONL line and flushes it to disk. Returns the size."""
     path = shard_path(shard_num)
     line = json.dumps(record, ensure_ascii=False)
     with open(path, "a", encoding="utf-8") as f:
@@ -389,13 +389,13 @@ def log(msg):
 
 
 # ---------------------------------------------------------------------------
-# СЕТЬ
+# NETWORK
 # ---------------------------------------------------------------------------
 
 def ask_ollama(prompt, temperature):
-    """Один запрос к /api/chat. Возвращает (текст ответа, eval_count).
+    """One request to /api/chat. Returns (response text, eval_count).
 
-    Ошибки не глотаем — их обрабатывает do_one (backoff/Retry-After)."""
+    Errors are not swallowed — do_one handles them (backoff/Retry-After)."""
     payload = {
         "model": MODEL,
         "messages": [
@@ -411,21 +411,21 @@ def ask_ollama(prompt, temperature):
     data = r.json()
     content = data.get("message", {}).get("content", "")
     if not content:
-        raise RuntimeError(f"пустой ответ от модели: keys={list(data.keys())}")
+        raise RuntimeError(f"empty response from the model: keys={list(data.keys())}")
     return content, data.get("eval_count", 0)
 
 
 # ---------------------------------------------------------------------------
-# ОДИН SAMPLE И ЦИКЛ
+# ONE SAMPLE AND THE LOOP
 # ---------------------------------------------------------------------------
 
 def do_one(index, state):
-    """Делает один sample.
-    Возвращаем статус: "ok" (сохранено), "skip" (сохранено как брак,
-    идём дальше), "net" (сетевая ошибка — этот же index повторим)."""
+    """Processes one sample.
+    Returns a status: "ok" (saved), "skip" (saved as a reject,
+    moving on), "net" (network error — we will retry the same index)."""
     task, variation, prompt = prompt_for(index)
     temperature = random.uniform(*TEMP_RANGE)
-    log(f"#{index} запрос (t={temperature:.2f}): {task[:60]}...")
+    log(f"#{index} request (t={temperature:.2f}): {task[:60]}...")
     try:
         response, tokens = ask_ollama(prompt, temperature)
     except requests.HTTPError as e:
@@ -436,25 +436,25 @@ def do_one(index, state):
             ra = e.response.headers.get("retry-after")
             if ra:
                 state["min_backoff"] = float(ra)
-                err += f", Retry-After={float(ra):.0f}с"
+                err += f", Retry-After={float(ra):.0f}s"
         state["last_error"] = err
-        log(f"#{index} ОШИБКА: {err}")
+        log(f"#{index} ERROR: {err}")
         return "net"
     except Exception as e:
         state["consecutive_errors"] += 1
         state["last_error"] = f"{type(e).__name__}: {e}"
-        log(f"#{index} ОШИБКА: {state['last_error']}")
+        log(f"#{index} ERROR: {state['last_error']}")
         return "net"
 
     c_code = extract_c(response)
     if c_code is None:
         state["extract_fails"] += 1
-        log(f"#{index} в ответе нет C-блока "
-            f"(попытка {state['extract_fails']}/{MAX_EXTRACT_FAILS})")
+        log(f"#{index} response has no C block "
+            f"(attempt {state['extract_fails']}/{MAX_EXTRACT_FAILS})")
         if state["extract_fails"] < MAX_EXTRACT_FAILS:
-            return "net"   # повторим этот же index
-        # стабильно не даёт код — фиксируем брак и двигаемся дальше,
-        # иначе на «плохой» задаче можно застрять навсегда
+            return "net"   # retry the same index
+        # consistently returns no code — record a reject and move on,
+        # otherwise we could get stuck on a "bad" task forever
         record = {
             "id": index, "ts": now_iso(), "model": MODEL, "gcc": GCC_VERSION,
             "task": task, "variation": variation,
@@ -472,7 +472,7 @@ def do_one(index, state):
         if size >= MAX_SHARD_BYTES:
             state["shard_num"] += 1
         save_state(state)
-        log(f"#{index} брак записан (нет C-блока), идём дальше")
+        log(f"#{index} reject recorded (no C block), moving on")
         return "skip"
 
     o0 = compile_c(c_code, "O0")
@@ -498,20 +498,20 @@ def do_one(index, state):
         state["shard_num"] += 1
     if not (o0["ok"] or o2["ok"]):
         state["samples_bad_c"] += 1
-        log(f"#{index} C есть, но gcc не собрал: {o0['diag'][:200]}")
+        log(f"#{index} C is present, but gcc failed to compile it: {o0['diag'][:200]}")
     else:
         n0 = len(o0["asm"].splitlines()) if o0["ok"] else 0
         n2 = len(o2["asm"].splitlines()) if o2["ok"] else 0
-        log(f"#{index} OK ({tokens} токенов, C-строк {len(c_code.splitlines())}, "
-            f"asm -O0 {n0} строк, -O2 {n2} строк)")
+        log(f"#{index} OK ({tokens} tokens, C lines {len(c_code.splitlines())}, "
+            f"asm -O0 {n0} lines, -O2 {n2} lines)")
     state["prompt_index"] = index + 1
     save_state(state)
     return "ok"
 
 
 def run_forever(state):
-    log(f"=== старт/возобновление: продолжаю с sample #{state['prompt_index']}, "
-        f"комбинаций промптов всего {COMBO} ===")
+    log(f"=== start/resume: continuing from sample #{state['prompt_index']}, "
+        f"{COMBO} prompt combinations in total ===")
     backoff = 5.0
     last_state_ts = time.time()
     while True:
@@ -520,11 +520,11 @@ def run_forever(state):
             backoff = 5.0
             wait = PAUSE + random.uniform(*JITTER)
         else:
-            # сетевая ошибка: экспоненциальный backoff 5с, 10с, 20с ... до часа,
-            # но не меньше Retry-After, если сервер его прислал
+            # network error: exponential backoff 5s, 10s, 20s ... up to an hour,
+            # but not less than Retry-After if the server sent it
             backoff = min(backoff * 2, MAX_BACKOFF)
             wait = max(backoff, state.get("min_backoff") or 0)
-            log(f"жду {wait:.0f}с перед повтором")
+            log(f"waiting {wait:.0f}s before retrying")
         if time.time() - last_state_ts > STATE_EVERY_SECONDS:
             save_state(state)
             last_state_ts = time.time()
@@ -532,7 +532,7 @@ def run_forever(state):
 
 
 # ---------------------------------------------------------------------------
-# САМОПРОВЕРКА (офлайн, без сети) И CLI
+# SELF-TEST (offline, no network) AND CLI
 # ---------------------------------------------------------------------------
 
 SELF_TEST_C = r"""
@@ -552,45 +552,45 @@ int main(void)
 
 
 def self_test():
-    """Проверяет только gcc-часть: компиляцию, листинг и чистку служебных строк.
-    Сеть не нужна. Возвращает 0 при успехе."""
-    print("1) извлечение C-блока из ответа")
-    sample = "Вот код:\n```c\nint main(void){return 0;}\n```\nГотово."
+    """Checks only the gcc part: compilation, listing and cleaning of service lines.
+    No network required. Returns 0 on success."""
+    print("1) extracting the C block from the response")
+    sample = "Here is the code:\n```c\nint main(void){return 0;}\n```\nDone."
     code = extract_c(sample)
     assert code == "int main(void){return 0;}", repr(code)
-    assert extract_c("нет блока") is None
+    assert extract_c("no block") is None
     print("   ok")
 
-    print("2) gcc -O0/-O2 и чистка листинга")
+    print("2) gcc -O0/-O2 and listing cleanup")
     o0 = compile_c(SELF_TEST_C, "O0")
     o2 = compile_c(SELF_TEST_C, "O2")
     assert o0["ok"] and o0["asm"], o0["diag"]
     assert o2["ok"] and o2["asm"], o2["diag"]
     for name, res in (("O0", o0), ("O2", o2)):
         asm = res["asm"]
-        assert ".file" not in asm, f"{name}: .file остался"
-        assert ".ident" not in asm, f"{name}: .ident остался"
-        assert ".note" not in asm, f"{name}: .note остался"
-        assert "/tmp/" not in asm, f"{name}: утёк временный путь"
-        assert not asm.startswith("#"), f"{name}: шапка компилятора осталась"
-        assert asm.lstrip().startswith(".text"), f"{name}: начало не .text"
-        assert "main:" in asm, f"{name}: нет метки main"
-        assert "square" in asm or "imul" in asm, f"{name}: нет тела square"
-        print(f"   {name}: {len(asm.splitlines())} строк листинга — ok")
+        assert ".file" not in asm, f"{name}: .file still present"
+        assert ".ident" not in asm, f"{name}: .ident still present"
+        assert ".note" not in asm, f"{name}: .note still present"
+        assert "/tmp/" not in asm, f"{name}: temporary path leaked"
+        assert not asm.startswith("#"), f"{name}: compiler header still present"
+        assert asm.lstrip().startswith(".text"), f"{name}: does not start with .text"
+        assert "main:" in asm, f"{name}: no main label"
+        assert "square" in asm or "imul" in asm, f"{name}: no square body"
+        print(f"   {name}: {len(asm.splitlines())} listing lines — ok")
 
-    print("3) битый C -> compile fail, не исключение")
+    print("3) broken C -> compile fail, not an exception")
     bad = compile_c("int main(void) { this is not C }", "O0")
     assert not bad["ok"] and bad["diag"], bad
     print("   ok")
 
-    print("4) промпты детерминированы и покрывают пространство")
+    print("4) prompts are deterministic and cover the space")
     a = prompt_for(0)
     b = prompt_for(0)
     assert a == b
-    assert prompt_for(len(TASKS)) != a          # следующий вариант
-    assert prompt_for(COMBO) == a               # цикл замкнулся
-    print(f"   ok (задач {len(TASKS)}, вариантов {len(VARIATIONS)}, "
-          f"комбинаций {COMBO})")
+    assert prompt_for(len(TASKS)) != a          # the next variation
+    assert prompt_for(COMBO) == a               # the cycle has closed
+    print(f"   ok ({len(TASKS)} tasks, {len(VARIATIONS)} variations, "
+          f"{COMBO} combinations)")
 
     print("ALL SELF-TESTS PASSED")
     return 0
@@ -598,14 +598,14 @@ def self_test():
 
 def main():
     ap = argparse.ArgumentParser(
-        description="Линия A1: пары C -> gcc-листинг (O0 и O2) через beam")
+        description="Line A1: C -> gcc listing pairs (O0 and O2) via beam")
     ap.add_argument("--once", action="store_true",
-                    help="сделать ровно один sample и выйти (проверка связи)")
+                    help="do exactly one sample and exit (connectivity check)")
     ap.add_argument("--dry-run", type=int, default=0, metavar="N",
-                    help="показать первые N промптов и выйти (без сети)")
-    ap.add_argument("--status", action="store_true", help="показать чекпоинт")
+                    help="show the first N prompts and exit (no network)")
+    ap.add_argument("--status", action="store_true", help="show the checkpoint")
     ap.add_argument("--self-test", action="store_true",
-                    help="офлайн-проверка gcc-части, без сети")
+                    help="offline check of the gcc part, no network")
     args = ap.parse_args()
 
     if args.self_test:
@@ -627,7 +627,7 @@ def main():
 
     if args.once:
         status = do_one(state["prompt_index"], state)
-        print(f"статус: {status}")
+        print(f"status: {status}")
         return
 
     while True:
@@ -635,7 +635,7 @@ def main():
             run_forever(state)
         except KeyboardInterrupt:
             save_state(state)
-            log("остановлено вручную (Ctrl+C)")
+            log("stopped manually (Ctrl+C)")
             return
 
 

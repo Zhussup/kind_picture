@@ -1,28 +1,28 @@
 #!/usr/bin/env python3
 """
-build_dataset.py — собирает датасет линии A1 для направления asm -> C.
+build_dataset.py — builds the A1 dataset for the asm -> C direction.
 
-Вход:  ml/asm/raw_c/shard_*.jsonl (то, что пишет gen_c.py).
-Выход: ml/asm/dataset/train.jsonl + val.jsonl в chat-формате:
-       system  — задача (реконструируй C по листингу gcc);
-       user    — asm-листинг, очищенный от утечек;
-       assistant — исходный C в блоке ```c.
+Input:  ml/asm/raw_c/shard_*.jsonl (what gen_c.py writes).
+Output: ml/asm/dataset/train.jsonl + val.jsonl in chat format:
+        system  — the task (reconstruct C from the gcc listing);
+        user    — the asm listing, cleaned of leaks;
+        assistant — the original C inside a ```c block.
 
-Важно про утечку исходника:
-  gen_c.py компилирует с -fverbose-asm, поэтому в листинге есть строки
-  "# prog.c:7: for (...)": это дословные строки исходника. Если оставить
-  их, задача asm->C превращается в копирование. Поэтому здесь такие
-  комментарии вырезаются (SRC_LINE_RE). Прочие комментарии gcc
-  (например "#, f" — имена операндов) остаются: это честная часть asm.
+Important about source leakage:
+  gen_c.py compiles with -fverbose-asm, so the listing contains lines like
+  "# prog.c:7: for (...)": these are verbatim source lines. If they are kept,
+  the asm->C task turns into copying. Therefore such comments are cut here
+  (SRC_LINE_RE). Other gcc comments
+  (for example "#, f" — operand names) are kept: they are an honest part of asm.
 
-Сплит train/val делается по id ИСХОДНОЙ записи, а не по sample: два
-листинга одной программы (-O0 и -O2) обязаны попасть в один и тот же
-сплит, иначе валидация видит тот же ответ, что и обучение.
+The train/val split is done by the id of the ORIGINAL record, not by sample: the two
+listings of one program (-O0 and -O2) must land in the same split,
+otherwise validation sees the same answer as training.
 
-Запуск:
-  python3 build_dataset.py                 собрать всё, что есть
+Usage:
+  python3 build_dataset.py                 build everything that is available
   python3 build_dataset.py --val-ratio 0.02 --min-asm-lines 8
-  python3 build_dataset.py --dry-run       только статистика, без записи
+  python3 build_dataset.py --dry-run       statistics only, no writing
 """
 
 import argparse
@@ -46,12 +46,12 @@ SYSTEM_PROMPT = (
     "nothing else."
 )
 
-# "# prog.c:7:     for (int i = 2; i <= n; ++i) f *= i;" — утечка исходника
+# "# prog.c:7:     for (int i = 2; i <= n; ++i) f *= i;" — source leak
 SRC_LINE_RE = re.compile(r"^\s*#.*?prog\.c:\d+:")
 
 
 def strip_source_comments(asm_text):
-    """Убирает из листинга комментарии-эхо исходных строк (см. docstring)."""
+    """Removes source-echo comments from the listing (see the docstring)."""
     return "\n".join(
         ln for ln in asm_text.splitlines() if not SRC_LINE_RE.match(ln)
     )
@@ -70,8 +70,8 @@ def assistant_message(c_text):
 
 
 def iter_records():
-    """Читает все шарды по порядку. Битую/недописанную строку пропускает:
-    сборщик может писать в последний шард прямо во время чтения."""
+    """Reads all shards in order. Skips broken/partial lines:
+    the collector may be writing to the last shard while we are reading it."""
     paths = sorted(glob.glob(os.path.join(RAW_DIR, "shard_*.jsonl")))
     for path in paths:
         with open(path, "r", encoding="utf-8") as f:
@@ -86,8 +86,8 @@ def iter_records():
 
 
 def is_val(source_id, val_ratio):
-    """Детерминированный сплит по id исходной записи: перезапуск даёт тот же
-    результат, и обе оптимизации одной программы попадают в один сплит."""
+    """Deterministic split by the original record's id: a restart gives the same
+    result, and both optimizations of one program land in the same split."""
     h = int(hashlib.sha1(str(source_id).encode()).hexdigest()[:8], 16)
     return h % 10_000 < int(val_ratio * 10_000)
 
@@ -148,8 +148,8 @@ def build(val_ratio, min_asm_lines):
 
 
 def write_jsonl(path, rows):
-    """Атомарная запись: сначала .tmp, потом os.replace. Если обучение читает
-    файл в момент пересборки, оно увидит либо старую версию, либо новую."""
+    """Atomic write: first .tmp, then os.replace. If training reads the
+    file while it is being rebuilt, it sees either the old version or the new one."""
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         for row in rows:
@@ -161,20 +161,20 @@ def write_jsonl(path, rows):
 
 def main():
     ap = argparse.ArgumentParser(
-        description="Собрать датасет asm->C из ml/asm/raw_c/")
+        description="Build the asm->C dataset from ml/asm/raw_c/")
     ap.add_argument("--val-ratio", type=float, default=0.02,
-                    help="доля валидации (по id исходной записи), по умолчанию 0.02")
+                    help="validation fraction (by original record id), default 0.02")
     ap.add_argument("--min-asm-lines", type=int, default=8,
-                    help="пропускать листинги короче N строк")
+                    help="skip listings shorter than N lines")
     ap.add_argument("--dry-run", action="store_true",
-                    help="только статистика, ничего не писать")
+                    help="statistics only, write nothing")
     args = ap.parse_args()
 
     train, val, stats = build(args.val_ratio, args.min_asm_lines)
 
     print(json.dumps(stats, ensure_ascii=False, indent=2))
     if not stats["samples"]:
-        print("пока нечего собирать: в raw_c/ нет ни одной пригодной пары")
+        print("nothing to build yet: raw_c/ has no usable pairs")
         return
 
     if args.dry_run:
@@ -186,7 +186,7 @@ def main():
     with open(os.path.join(OUT_DIR, "stats.json"), "w", encoding="utf-8") as f:
         json.dump(stats, f, ensure_ascii=False, indent=2)
 
-    print(f"записано: {OUT_DIR}/train.jsonl ({stats['train']}), "
+    print(f"written: {OUT_DIR}/train.jsonl ({stats['train']}), "
           f"val.jsonl ({stats['val']})")
 
 

@@ -1,26 +1,26 @@
 #!/usr/bin/env python3
 """
-eval.py — оценка модели на val-наборе asm -> C.
+eval.py — evaluates the model on the asm -> C val set.
 
-Что делает:
-  1. читает dataset/val.jsonl (пары «листинг -> C», которых не было в обучении);
-  2. для каждой пары собирает промпт (system + user, как в датасете) и просит
-     модель восстановить C; генерация ЖАДНАЯ (do_sample=False) — ответ
-     детерминирован, сравнение не зависит от случайности;
-  3. вынимает из ответа блок ```c (тот же экстрактор, что в gen_c.py);
-  4. компилирует найденный C и прогоняет difftest против эталонного C;
-  5. считает метрики:
-       compile_rate — доля ответов, которые вообще собрались;
-       pass_rate    — доля пар, где поведение совпало на всех входах.
+What it does:
+  1. reads dataset/val.jsonl (pairs "listing -> C" that were not in training);
+  2. for each pair builds a prompt (system + user, as in the dataset) and asks
+     the model to reconstruct the C; generation is GREEDY (do_sample=False) — the answer
+     is deterministic, so comparison does not depend on randomness;
+  3. extracts the ```c block from the answer (the same extractor as in gen_c.py);
+  4. compiles the extracted C and runs difftest against the reference C;
+  5. computes metrics:
+       compile_rate — fraction of answers that compiled at all;
+       pass_rate    — fraction of pairs whose behavior matched on all inputs.
 
-Эталонный C берётся из assistant-сообщения val-пары, наблюдаемое поведение —
-из прогона этого C. Ответ модели сравнивается с ним по ПОВЕДЕНИЮ, а не по
-тексту: другой C с тем же поведением — правильный ответ.
+The reference C is taken from the assistant message of the val pair, and the observable
+behavior comes from running that C. The model's answer is compared to it by BEHAVIOR, not
+by text: different C with the same behavior is a correct answer.
 
-Сравнение «до/после обучения»: один и тот же val, те же входы, те же
-параметры генерации; отличается только --model/--adapter.
+"Before/after training" comparison: the same val, the same inputs, the same
+generation parameters; only --model/--adapter differs.
 
-Запуск:
+Usage:
   python3 eval.py --model Qwen/Qwen3-0.6B --limit 5
   python3 eval.py --model Qwen/Qwen3-0.6B --adapter checkpoints/lora --tag lora
   python3 eval.py --model Qwen/Qwen3-0.6B --cases my_inputs.json --out-dir results
@@ -62,19 +62,19 @@ def load_rows(path, limit):
 
 
 def reference_c(sample):
-    """Достаёт C из assistant-сообщения val-пары (там он в блоке ```c)."""
+    """Extracts the C from the assistant message of the val pair (there it is inside a ```c block)."""
     text = sample["messages"][-1]["content"]
     m = C_FENCE_RE.search(text)
     return (m.group(1) if m else text).strip()
 
 
 def build_prompt(tokenizer, sample):
-    """System + user из датасета -> строка промпта в чат-шаблоне модели.
+    """System + user from the dataset -> a prompt string in the model's chat template.
 
-    enable_thinking=False для Qwen3: иначе модель сначала «думает» и тратит
-    сотни токенов на рассуждения, которых в нашем ответе быть не должно.
-    Если шаблон модели такого аргумента не знает — падаем обратно на обычный
-    вызов (TypeError)."""
+    enable_thinking=False for Qwen3: otherwise the model first "thinks" and spends
+    hundreds of tokens on reasoning that must not appear in our answer.
+    If the model's template does not know this argument, we fall back to a plain
+    call (TypeError)."""
     msgs = [m for m in sample["messages"] if m["role"] in ("system", "user")]
     try:
         return tokenizer.apply_chat_template(
@@ -91,12 +91,12 @@ def generate(model, tokenizer, prompt, max_new_tokens):
     out = model.generate(
         **inputs,
         max_new_tokens=max_new_tokens,
-        do_sample=False,                     # жадная генерация: детерминизм
+        do_sample=False,                     # greedy generation: determinism
         pad_token_id=tokenizer.eos_token_id,
     )
     new_ids = out[0][inputs["input_ids"].shape[1]:]
     text = tokenizer.decode(new_ids, skip_special_tokens=True)
-    # упёрлись ли в лимит: тогда ответ обрезан и «провал» может быть артефактом
+    # did we hit the limit: then the answer is truncated and a "failure" may be an artifact
     hit_max = int(new_ids.shape[0]) >= max_new_tokens
     return text, hit_max
 
@@ -110,8 +110,8 @@ ASM_LINE_RE = re.compile(
 
 
 def output_kind(text):
-    """Грубая классификация ответа: 'c', 'asm' (модель скопировала листинг
-    в блок ```c) или 'other'. Нужна для диагностики, а не для метрики."""
+    """Rough classification of the answer: 'c', 'asm' (the model copied the listing
+    into a ```c block) or 'other'. Needed for diagnostics, not for the metric."""
     if not text:
         return "other"
     if "#include" in text or re.search(r"\b(int|void|char|long)\s+main\s*\(", text):
@@ -124,7 +124,7 @@ def load_model(name, adapter):
     tokenizer = AutoTokenizer.from_pretrained(name)
     kwargs = {"device_map": "auto"}
     try:
-        # transformers >= 5: параметр называется dtype
+        # transformers >= 5: the parameter is called dtype
         model = AutoModelForCausalLM.from_pretrained(
             name, dtype=torch.bfloat16, **kwargs)
     except TypeError:
@@ -142,20 +142,20 @@ def slug(text):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Оценка asm->C на val-наборе")
+    ap = argparse.ArgumentParser(description="Evaluate asm->C on the val set")
     ap.add_argument("--model", required=True,
-                    help="HF id или путь к весам (Qwen/Qwen3-0.6B)")
-    ap.add_argument("--adapter", help="путь к LoRA-адаптеру (для дообученной)")
+                    help="HF id or path to weights (Qwen/Qwen3-0.6B)")
+    ap.add_argument("--adapter", help="path to a LoRA adapter (for a fine-tuned model)")
     ap.add_argument("--val", default=VAL_PATH, help="val.jsonl")
-    ap.add_argument("--cases", help="JSON со входами для difftest")
-    ap.add_argument("--limit", type=int, default=0, help="взять первые N пар")
+    ap.add_argument("--cases", help="JSON with inputs for difftest")
+    ap.add_argument("--limit", type=int, default=0, help="take the first N pairs")
     ap.add_argument("--max-new-tokens", type=int, default=1024)
     ap.add_argument("--out-dir", default=OUT_DIR)
-    ap.add_argument("--tag", default="", help="метка прогона (имя файлов)")
+    ap.add_argument("--tag", default="", help="run label (used in file names)")
     args = ap.parse_args()
 
     if not os.path.exists(args.val):
-        print(f"нет файла {args.val}: сначала запусти build_dataset.py",
+        print(f"no file {args.val}: run build_dataset.py first",
               file=sys.stderr)
         sys.exit(3)
 
@@ -165,16 +165,16 @@ def main():
             with open(args.cases, "r", encoding="utf-8") as f:
                 inputs = json.load(f)
         except (OSError, json.JSONDecodeError) as e:
-            print(f"ошибка в cases: {e}", file=sys.stderr)
+            print(f"error in cases: {e}", file=sys.stderr)
             sys.exit(3)
 
     rows = load_rows(args.val, args.limit)
     if not rows:
-        print("val пуст", file=sys.stderr)
+        print("val is empty", file=sys.stderr)
         sys.exit(3)
 
-    print(f"модель: {args.model}" + (f" + {args.adapter}" if args.adapter else ""))
-    print(f"val: {len(rows)} пар, входов difftest: {len(inputs)}")
+    print(f"model: {args.model}" + (f" + {args.adapter}" if args.adapter else ""))
+    print(f"val: {len(rows)} pairs, difftest inputs: {len(inputs)}")
     model, tokenizer = load_model(args.model, args.adapter)
 
     os.makedirs(args.out_dir, exist_ok=True)
@@ -202,7 +202,7 @@ def main():
                 verdict = {"ref_compiled": True, "cand_compiled": False,
                            "stage": "cand_compile", "n_total": len(inputs),
                            "n_passed": 0, "all_match": False,
-                           "error": "в ответе нет блока ```c", "cases": []}
+                           "error": "the response has no ```c block", "cases": []}
             else:
                 verdict = difftest.compare(ref_c, cand_c, inputs)
 
@@ -275,7 +275,7 @@ def main():
         json.dump(summary, f, ensure_ascii=False, indent=2)
 
     print("\n" + json.dumps(summary, ensure_ascii=False, indent=2))
-    print(f"\nпредсказания: {pred_path}\nсводка:      {sum_path}")
+    print(f"\npredictions: {pred_path}\nsummary:     {sum_path}")
 
 
 if __name__ == "__main__":
