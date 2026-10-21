@@ -1,14 +1,14 @@
 {
   "version": 1,
-  "prompt_index": 779,
+  "prompt_index": 810,
   "shard_num": 2,
-  "samples_ok": 779,
+  "samples_ok": 810,
   "samples_no_c": 0,
-  "samples_bad_c": 16,
+  "samples_bad_c": 17,
   "extract_fails": 0,
   "consecutive_errors": 0,
   "min_backoff": null,
   "last_error": null,
   "started_at": "2026-10-21T10:28:40+05:00",
-  "updated_at": "2026-10-21T12:31:05+05:00"
+  "updated_at": "2026-10-21T12:34:58+05:00"
 }

@@ -1,199 +1,214 @@
+<div align="center">
+
 # kind_picture
 
-A learning project on the way to owning a small domain-specific language
-model: collect data, build datasets, fine-tune a small pretrained model.
+### Teaching a 0.6B model to read x86-64 assembly and write back working C
 
-The repository currently contains two independent data pipelines:
+![task](https://img.shields.io/badge/task-x86--64%20asm%20%E2%86%92%20C-2a78d6?style=flat-square)
+![model](https://img.shields.io/badge/model-Qwen3--0.6B-6250d6?style=flat-square)
+![gpu](https://img.shields.io/badge/GPU-RTX%203050%206%20GB-1baf7a?style=flat-square)
+![status](https://img.shields.io/badge/status-early%20prototype-eb6834?style=flat-square)
 
-| Pipeline | Purpose | Folder |
-|----------|---------|--------|
-| General programming corpus | broad Q&A/code corpus from an Ollama Cloud model, used as SFT material | `dset/` |
-| x86-64 asm → C dataset | narrow dataset for assembly reconstruction with mechanical verification | `ml/asm/` |
+**A narrow, mechanically verifiable code model that runs on a laptop.**
 
-```
-kind_picture/
-├── dset/      corpus collector + dataset builder (general programming)
-├── ml/asm/    asm → C dataset pipeline (collector, builder, differential tester, verifier)
-├── legacy/    archived shards from the first corpus collector (do not delete)
-├── docs/      notes
-└── .venv/     local Python environment
-```
+[Pipeline](#pipeline) · [Results](#results) · [Quick start](#quick-start) · [Roadmap](#roadmap) · [Docs](#docs)
 
-Requirements: a running Ollama daemon with a logged-in Ollama Cloud account
-(the `beam:cloud` model), Python 3 with `requests`, and `gcc`/`binutils` for
-the asm pipeline.
+</div>
 
 ---
 
-## dset/ — general programming corpus
+> **Status (2026-10-21):** the pipeline works end-to-end — collection, dataset
+> building, differential verification, LoRA training and evaluation. The first
+> full fine-tuning run is in progress. Early numbers are below, reported as
+> they are.
 
-The collector runs the free cloud model `beam:cloud` through the Ollama API
-around the clock and stores "prompt → answer" dialogues about programming.
-`build_dataset.py` later turns them into a fine-tuning dataset.
+## The idea
 
-### Files
+Most code models are trained on the easy direction: source code → assembly.
+Reverse engineering needs the opposite. Given a compiler listing, recover C
+that **behaves the same** — and prove it mechanically.
 
-| File/folder | What it is |
-|---|---|
-| `collector.py` | the collector itself (endless loop) |
-| `build_dataset.py` | turns collected data into `dataset.jsonl` for fine-tuning |
-| `run.sh` | starts it in the background with auto-restart |
-| `stop.sh` | stops it |
-| `raw/` | data in shards: `shard_00001.jsonl`, `shard_00002.jsonl`, … |
-| `state.json` | **checkpoint** — saved progress, so a restart continues where it stopped |
-| `collector.log` | work log (every sample and every error) |
-| `collector_console.log` | full `run.sh` output (mostly duplicates the log) |
-| `dataset.jsonl` | the finished dataset (appears after `build_dataset.py`) |
+That constraint is what makes this project interesting:
 
-### First run (sanity check)
+- **Ground truth by construction.** A hosted C program is compiled by gcc at
+  `-O0` and `-O2`; the listings are the input, the original C is the target.
+  No human labels, no synthetic guesses.
+- **Correctness is behavioral, not textual.** The predicted C and the
+  reference C are compiled with the same gcc and run on identical stdin. Same
+  stdout and exit code on every probe means the reconstruction is correct —
+  even if the code looks completely different.
+- **Leak-free by design.** `-fverbose-asm` embeds the original source lines in
+  comments. The dataset builder removes exactly those lines, so the model
+  cannot win by copying.
+- **Small enough to own.** Qwen3-0.6B plus a 10.1M-parameter LoRA adapter fits
+  a 6 GB laptop GPU. The goal is a domain model you can run, inspect and
+  retrain yourself — not an API bill.
 
-1. Ollama must be running and logged in to Ollama Cloud (`ollama run
-   beam:cloud` once is enough; the daemon usually stays on port 11434).
-2. Check connectivity with a single request:
+## Pipeline
 
-   ```bash
-   cd dset
-   python3 collector.py --once
-   ```
+```mermaid
+flowchart LR
+  T["72 task templates x 10 variations"] --> G["beam:cloud writes C"]
+  G --> GCC["gcc -O0 / -O2"]
+  GCC --> L["AT&T listing + reference C"]
+  L --> B["build_dataset.py<br/>strip leaks, dedupe, hash split"]
+  B --> D["train.jsonl / val.jsonl"]
+  D --> S["LoRA SFT, Qwen3-0.6B"]
+  S --> M["reconstructed C"]
+  R["reference C"] --> DT["difftest.py"]
+  M --> DT
+  DT --> V["compile_rate / pass_rate"]
+```
 
-   It prints `#0 OK ...` and creates `raw/shard_00001.jsonl`.
+The two data lines are deliberately kept apart:
 
-### Continuous run (24/7)
+| Line | Input | Correctness established by | Status |
+|------|-------|----------------------------|--------|
+| **A1** | gcc-generated hosted C listings (`main`, libc) | ground truth by construction | collecting + training |
+| **B** | freestanding `_start` programs, syscalls only | `verifier.py` test runs | planned |
+
+Mixing them would create contradictory answers for the same question: hosted
+code uses libc and PLT calls, freestanding code talks to the kernel directly.
+
+## Results
+
+| Run | Validation | Compiles | Same behavior | What it shows |
+|-----|-----------:|---------:|--------------:|---------------|
+| Base Qwen3-0.6B | 26 pairs | 26.9% | 0% | the starting point: often copies the listing into a `c` block |
+| Smoke LoRA, 60 pairs x 3 epochs | 16 pairs* | 37.5% | 0% | format learned: **16/16** answers are C; expected to overfit |
+| Full LoRA, 723 pairs x 2 epochs | 26 pairs | in progress | in progress | first run on the real dataset |
+
+\* The smoke run used the earlier 16-pair split, so it is not directly
+comparable with the 26-pair baseline. Its purpose was to validate the training
+loop, not to claim accuracy.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="ml/asm/docs/training_loss_dark.png">
+  <img src="ml/asm/docs/training_loss_light.png"
+       alt="Smoke-run training loss on assistant tokens: 1.38 at the first step, 0.12 at the last, over 45 optimizer steps"
+       width="840">
+</picture>
+
+Cross-entropy on assistant tokens only: the system prompt, the question and
+the assembly listing are masked with `-100`, so every gradient comes from the
+C answer. Loss falls from 1.38 to 0.12 over 45 optimizer steps.
+
+## Dataset at a glance
+
+| Metric | Value |
+|--------|-------|
+| Programs collected | **803** (collector still running) |
+| Programs in the current dataset snapshot | 679 |
+| Listings (`-O0` + `-O2`) | **1,302** |
+| Train / validation pairs | **1,276 / 26**, split by hashed source id |
+| Prompt space | 72 tasks x 10 wording variations = **720** |
+| Duplicates removed / compile failures excluded | 30 / 26 |
+
+Every pair carries two views of the same program: `-O0` preserves the source
+structure, `-O2` shows what the optimizer does to it. The split is by source
+record, so both optimization levels of one program always land on the same
+side.
+
+## Quick start
+
+Requirements: Python 3.13, `gcc`/`binutils`, and for training a CUDA GPU
+(the current runs use an RTX 3050 Laptop with 6 GB). Versions used here:
+PyTorch 2.6.0+cu124, Transformers 5.20.2, PEFT 0.21.2, Accelerate 1.15.0.
 
 ```bash
-cd dset
-bash run.sh
+python3 -m venv .venv
+source .venv/bin/activate
+pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cu124
+pip install transformers peft accelerate matplotlib requests
 ```
 
-The script starts the collector in the background via **nohup** (the process
-survives closing the terminal) and restarts it in a loop if it ever dies.
-
-### Laptop shutdown / lost network is not a problem
-
-- **No network** — the program does not crash: errors are logged and retried
-  with exponential **backoff** (5 s → 10 s → 20 s … up to 1 hour); when the
-  network returns, collection resumes.
-- **Laptop powered off** — no matter at which moment: every record is
-  **flushed + fsync'ed** to disk before moving on (so only complete lines are
-  ever on disk), and the checkpoint is written **atomically** (temp file +
-  rename — the file is either fully old or fully new, never half-written).
-
-### Restarting (resuming)
+Build the dataset from the collected shards, train, and evaluate:
 
 ```bash
-cd dset
-bash run.sh
+# 1. rebuild train/val from ml/asm/raw_c/ (safe while the collector runs)
+python3 ml/asm/build_dataset.py
+
+# 2. smoke test the training loop on 60 short pairs
+python3 ml/asm/train.py --limit 60 --epochs 3 --max-seq-len 1024 \
+    --grad-accum 4 --tag smoke
+
+# 3. full run
+python3 ml/asm/train.py --epochs 2 --max-seq-len 2048 \
+    --grad-accum 8 --tag full
+
+# 4. compare the base model and the adapter on the same validation set
+python3 ml/asm/eval.py --model Qwen/Qwen3-0.6B --tag base
+python3 ml/asm/eval.py --model Qwen/Qwen3-0.6B \
+    --adapter ml/asm/checkpoints/lora-full/final --tag full
 ```
 
-Nothing else to pass — the program reads `state.json` and continues from the
-last sample. Prompts are generated deterministically from the sample index (no
-randomness in prompt construction), so a restart continues exactly at the next
-unseen prompt.
-
-Useful commands:
-
-```bash
-python3 collector.py --status     # progress (samples_ok, last error, timestamps)
-python3 collector.py --dry-run 3  # print the next 3 prompts, no network
-tail -f collector.log             # live log
-wc -l raw/*.jsonl                 # how many samples collected
-```
-
-### Stopping
-
-```bash
-cd dset
-bash stop.sh
-```
-
-### Building the dataset
-
-```bash
-cd dset
-python3 build_dataset.py
-```
-
-This produces `dataset.jsonl` — **JSONL** (one JSON object per line):
-
-```json
-{"id": 0, "category": "implement", "lang": "Python",
- "messages": [{"role": "system", "content": "..."},
-              {"role": "user", "content": "..."},
-              {"role": "assistant", "content": "..."}]}
-```
-
-That is the standard chat-dataset format; it works for fine-tuning a small
-Qwen-class model (0.5–0.6B) with unsloth / llama-factory / axolotl and is easy
-to convert to plain text if needed.
-
-### Built-in protections in `collector.py`
-
-- **Jitter** — a random 0–1.5 s is added to the base 2 s pause, so the traffic
-  does not look perfectly machine-timed and is less likely to trip anti-abuse
-  protection.
-- **Random temperature** (0.6–0.95 per request, stored in the record) — with
-  thousands of generations at one temperature the model starts repeating
-  itself (same variable names and tricks); this is called **mode collapse**.
-- **Syntax check** — every ```python block in an answer is run through
-  `ast.parse` (the module that builds a syntax tree; if it fails to parse, the
-  code is definitely broken). The result is stored in `code_valid`. Such
-  samples are excluded from the dataset by default; bring them back with
-  `--include-invalid`.
-- **429 / 503** — on "Too Many Requests" the `Retry-After` header (how many
-  seconds the server asks to wait) sets a minimum for the backoff
-  (5 s → 10 s → … → 1 hour).
-
-### Glossary
-
-- **Ollama API** — HTTP interface of the local ollama server at
-  `http://localhost:11434`; the cloud model `beam:cloud` is called the same
-  way as a local one (beam is free / zero-rated).
-- **Checkpoint** (`state.json`) — a small note "where we stopped": next prompt
-  index, shard number, error statistics.
-- **JSONL** — a text file where each line is a separate JSON object; easy to
-  append one record at a time.
-- **Shard** — a piece of data (a file with ~8 MB of answers), so a failure
-  damages at most one piece.
-- **fsync** — forces the OS to write data to disk immediately instead of
-  keeping it in the page cache; otherwise a power loss could lose the last
-  minutes of records.
-- **Atomic write** — write to a temp file, then rename; rename is atomic, so
-  the file can never be half-written.
-- **Backoff** — the pause grows on repeated errors (5 s, 10 s, 20 s …) instead
-  of hammering a failing server every second.
-- **nohup** — makes a process survive closing the terminal.
-
----
-
-## ml/asm/ — x86-64 asm → C dataset
-
-The narrow pipeline: the model receives an x86-64 assembly listing in AT&T
-syntax produced by gcc and must reconstruct C with the same observable
-behavior. Correctness is checked by differential testing (same stdin → same
-stdout/exit as the original), not by comparing C text.
-
-| File | What it does |
-|---|---|
-| `gen_c.py` | asks `beam:cloud` for a C program, compiles it with gcc at `-O0` and `-O2`, stores both listings |
-| `build_dataset.py` | builds chat-format train/val JSONL (listing → original C), strips source-line leaks, deduplicates |
-| `difftest.py` | differential tester: compiles reference and predicted C, runs both on identical inputs, compares behavior |
-| `verifier.py` | runner/checker for freestanding `_start` asm programs (future line B) |
+Collect more programs (needs a logged-in Ollama Cloud account and the
+`beam:cloud` model):
 
 ```bash
 cd ml/asm
-python3 gen_c.py --once          # one collected sample
-python3 gen_c.py                 # endless collection
-python3 build_dataset.py         # rebuild dataset/train.jsonl + val.jsonl
-python3 difftest.py ref.c cand.c # check a reconstruction
+python3 gen_c.py --once      # one sample
+python3 gen_c.py             # endless, crash-safe collection
+python3 gen_c.py --status    # checkpoint and error statistics
 ```
 
-Details, contracts, data format and exit codes: [ml/asm/README.md](ml/asm/README.md).
+## Repository layout
 
----
+```
+kind_picture/
+├── ml/asm/                 asm → C pipeline (the main project)
+│   ├── gen_c.py            collector: task → C → gcc -O0/-O2 listings
+│   ├── build_dataset.py    leak stripping, dedupe, train/val split
+│   ├── difftest.py         behavioral equivalence checker
+│   ├── eval.py             compile_rate / pass_rate on validation pairs
+│   ├── train.py            LoRA SFT with masked loss
+│   ├── plot_training.py    light/dark training-loss figures
+│   ├── verifier.py         freestanding asm runner (line B)
+│   └── docs/               figures used by the READMEs
+├── dset/                   earlier general-programming corpus collector
+├── legacy/                 archived first corpus, with SHA-256 checksums
+├── docs/                   notes
+└── README.md
+```
 
-## Legacy data
+## Roadmap
 
-The first corpus (2 628 samples of general programming Q&A in many languages,
-~21 MB) was moved to `legacy/dset_raw/` after the project pivoted to the
-asm → C dataset. It is not used by the current pipeline and must not be
-deleted. Checksums and restore instructions: [legacy/README.md](legacy/README.md).
+- [x] Crash-safe collector with atomic checkpoints and backoff
+- [x] Dataset builder with source-line leak stripping and deduplication
+- [x] Differential tester with timeouts, memory limits and signal handling
+- [x] Evaluation harness: `compile_rate`, `pass_rate`, per-optimization split
+- [x] LoRA training with assistant-only loss and memory-aware logits
+- [ ] First full run with a non-zero `pass_rate` on unseen tasks
+- [ ] Line B: freestanding `_start` programs verified by `verifier.py`
+- [ ] A larger model on a two-GPU server
+- [ ] Inference CLI: listing in, verifiable C out
+
+## Limitations
+
+This is an early research prototype, and the README says so on purpose:
+
+- The task is narrow: small hosted C programs generated from 72 templates,
+  compiled by gcc. It is not a general-purpose decompiler.
+- The current model is 0.6B parameters. Behavior match on unseen tasks is
+  still 0%; the full run is the first attempt to move that number.
+- Training skips pairs longer than `--max-seq-len` (2,048 tokens in the current
+  run) rather than truncating them. Long programs are underrepresented.
+- The corpus comes from a single cloud model, so its style and mistakes are
+  baked into the data.
+- Line B (freestanding assembly) is designed but not collected yet.
+
+## Docs
+
+- [ml/asm/README.md](ml/asm/README.md) — full pipeline reference: record
+  format, leak stripping, differential-testing rules, exit codes, training
+  details.
+- [dset/README.md](dset/README.md) — the earlier general-programming corpus
+  collector.
+- [legacy/README.md](legacy/README.md) — archived first corpus, checksums and
+  restore instructions.
+
+<div align="center">
+
+Built on **Qwen3-0.6B** with PyTorch, Transformers and PEFT.
+
+</div>
