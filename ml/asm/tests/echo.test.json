@@ -1,0 +1,5 @@
+[
+  {"name": "эхо одной строки", "stdin": "hello world\n", "stdout": "hello world\n", "exit": 0},
+  {"name": "пустой ввод -> пустой вывод", "stdin": "", "stdout": "", "exit": 0},
+  {"name": "несколько строк", "stdin": "a\nb\n", "stdout": "a\nb\n", "exit": 0}
+]
