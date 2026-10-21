@@ -1,0 +1,34 @@
+{
+  "model": "Qwen/Qwen3-0.6B",
+  "adapter": "checkpoints/lora-smoke/final",
+  "val": "/home/zhus/Desktop/projects/ml/kind_picture/ml/asm/dataset/val.jsonl",
+  "n": 16,
+  "compiled": 6,
+  "passed": 0,
+  "ref_errors": 0,
+  "truncated": 1,
+  "output_kinds": {
+    "c": 16
+  },
+  "compile_rate": 0.375,
+  "pass_rate": 0.0,
+  "by_opt": {
+    "O0": {
+      "n": 8,
+      "compile_rate": 0.25,
+      "pass_rate": 0.0
+    },
+    "O2": {
+      "n": 8,
+      "compile_rate": 0.5,
+      "pass_rate": 0.0
+    }
+  },
+  "decoding": {
+    "do_sample": false,
+    "max_new_tokens": 1024
+  },
+  "cases": "default",
+  "elapsed_seconds": 98.2,
+  "ts": "2026-10-21T12:17:48+05:00"
+}
