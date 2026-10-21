@@ -39,6 +39,9 @@ model answer (C) ──► difftest.py: original C vs predicted C ──► verd
 - `difftest.py` — differential tester: compiles the reference C and a
   predicted C, runs both on the same stdin inputs, compares stdout and exit
   codes.
+- `eval.py` — evaluates a local model (base or LoRA-tuned) on `val.jsonl`:
+  greedy generation, C extraction, `difftest` check, `compile_rate` and
+  `pass_rate`; writes predictions and a summary JSON.
 - `verifier.py` — runner/checker for line B asm programs: x86-64, AT&T syntax,
   entry point `_start`, no libc, I/O only through `read(0)` / `write(1)`
   syscalls. Exit codes: `0` all tests pass, `1` assembled but tests failed,
@@ -132,6 +135,10 @@ Rules for edge cases:
 - both sides time out → treated as a match (identical behavior);
 - only one side times out → mismatch;
 - a signal (SIGSEGV, SIGKILL, …) is compared as is;
+- if the **reference** itself hits our resource limits (timeout, SIGKILL from
+  `RLIMIT_CPU`, any signal), the input is marked inconclusive and excluded
+  from the score: reproducing "the reference was killed by a limit" is not a
+  meaningful target;
 - the reference failing to compile is an input error (exit `3`), not a model
   failure.
 
@@ -166,6 +173,11 @@ python3 build_dataset.py --val-ratio 0.02 --min-asm-lines 8
 python3 difftest.py ref.c cand.c                       # default inputs
 python3 difftest.py ref.c cand.c --cases cases.json    # custom inputs
 python3 difftest.py ref.c cand.c --json                # machine-readable
+
+# model evaluation on val
+python3 eval.py --model Qwen/Qwen3-0.6B                # baseline
+python3 eval.py --model Qwen/Qwen3-0.6B --adapter checkpoints/lora --tag lora
+python3 eval.py --model Qwen/Qwen3-0.6B --limit 5     # quick smoke run
 
 # line B asm programs
 python3 verifier.py prog.s --tests prog.test.json

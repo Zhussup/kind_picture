@@ -1,0 +1,36 @@
+{
+  "model": "Qwen/Qwen3-0.6B",
+  "adapter": null,
+  "val": "/home/zhus/Desktop/projects/ml/kind_picture/ml/asm/dataset/val.jsonl",
+  "n": 16,
+  "compiled": 7,
+  "passed": 0,
+  "ref_errors": 0,
+  "truncated": 2,
+  "output_kinds": {
+    "c": 11,
+    "asm": 4,
+    "other": 1
+  },
+  "compile_rate": 0.4375,
+  "pass_rate": 0.0,
+  "by_opt": {
+    "O0": {
+      "n": 8,
+      "compile_rate": 0.5,
+      "pass_rate": 0.0
+    },
+    "O2": {
+      "n": 8,
+      "compile_rate": 0.375,
+      "pass_rate": 0.0
+    }
+  },
+  "decoding": {
+    "do_sample": false,
+    "max_new_tokens": 1024
+  },
+  "cases": "default",
+  "elapsed_seconds": 90.9,
+  "ts": "2026-10-21T11:41:49+05:00"
+}
