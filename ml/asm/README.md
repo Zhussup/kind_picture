@@ -34,6 +34,9 @@ model answer (C) ──► difftest.py: original C vs predicted C ──► verd
 - `gen_c.py` — collector for line A1: asks the model named in `config.json`
   (`beam:cloud` by default) for a C program, compiles it with gcc at `-O0` and
   `-O2`, stores both listings.
+- `config.json` — settings for the collector: `model` (the teacher) and
+  `parallel` (requests in flight at once, 1 to 3, default 3). A value out of
+  range stops the collector with a message instead of being quietly clamped.
 - `collector.sh` — supervisor for `gen_c.py`: restarts it whenever it exits, for
   any reason (uncaught exception, killed process, Ollama gone after a shutdown),
   with a `flock` guard so a second copy cannot start.
@@ -133,8 +136,10 @@ Each sample is a chat record:
 - The reference record produces **two samples** (`-O0` and `-O2`).
 - **Teacher provenance:** every sample carries the `model` that wrote its C,
   copied from the record in `raw_c/` (`"unknown"` for shards collected before
-  the field existed). The collector takes the active model from
-  `config.json`, so switching teachers needs no code change. Two teachers can
+  the field existed). The collector reads its settings from `config.json`:
+  `model` is the active teacher, `parallel` is how many requests may be in
+  flight at once (1 to 3, default 3). Switching teachers or widening the
+  pipeline needs no code change. Two teachers can
   answer the same task at different lengths and in different styles, and a
   run that trains on them needs to see that split to balance or filter by it
   without joining back to `raw_c/`. `stats.json` reports the counts as

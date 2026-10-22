@@ -280,7 +280,7 @@ python3 gen_c.py --status    # checkpoint and error statistics
 kind_picture/
 ├── ml/asm/                 asm → C pipeline (the main project)
 │   ├── gen_c.py            collector: task → C → gcc -O0/-O2 listings
-│   ├── config.json         active teacher model for the collector
+│   ├── config.json         collector settings: teacher model, parallel requests
 │   ├── collector.sh        supervisor: restarts the collector if it dies
 │   ├── build_dataset.py    leak stripping, dedupe, train/val split
 │   ├── gen_cases.py        per-program differential probes

@@ -22,6 +22,11 @@ What the script does, step by step:
      "compiled/failed to compile". Written with flush+fsync (survives a power loss).
   5. The checkpoint state_gen_c.json is updated atomically.
 
+Requests run in parallel: `parallel` in config.json (1 to 3, default 3) sets
+how many are in flight at once. Every lane writes through one lock, so the
+shard stays intact, and the checkpoint advances only over indices that are
+already on disk.
+
 Format A1 — these are "C source → compiler listing" pairs. Tests are
 NOT run here: the only quality label is "does it compile". Pairs of format A2
 ("task → _start program + test run via verifier.py") are deliberately
@@ -47,11 +52,13 @@ import argparse
 import datetime
 import json
 import os
+import queue
 import random
 import re
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 import requests
@@ -66,6 +73,8 @@ STATE_PATH = os.path.join(BASE_DIR, "state_gen_c.json") # checkpoint
 LOG_PATH = os.path.join(BASE_DIR, "gen_c.log")          # log
 
 DEFAULT_MODEL = "beam:cloud"
+DEFAULT_PARALLEL = 3       # requests in flight at once, see config.json
+MAX_PARALLEL = 3           # hard ceiling: more lanes just queue inside Ollama
 HOST = "http://localhost:11434"     # local Ollama daemon (it holds the login)
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 
@@ -76,7 +85,7 @@ def load_config(path=CONFIG_PATH):
     A missing file keeps the defaults. A broken file stops the collector
     instead of silently falling back: collecting a whole shard with a model
     nobody chose is worse than not collecting at all."""
-    cfg = {"model": DEFAULT_MODEL}
+    cfg = {"model": DEFAULT_MODEL, "parallel": DEFAULT_PARALLEL}
     if not os.path.exists(path):
         return cfg
     try:
@@ -90,11 +99,20 @@ def load_config(path=CONFIG_PATH):
     if not isinstance(model, str) or not model.strip():
         raise SystemExit(f"{path}: 'model' must be a non-empty string")
     cfg["model"] = model.strip()
+    parallel = data.get("parallel", cfg["parallel"])
+    # bool is a subclass of int, so `true` would pass a plain isinstance check
+    if isinstance(parallel, bool) or not isinstance(parallel, int):
+        raise SystemExit(f"{path}: 'parallel' must be an integer")
+    if not 1 <= parallel <= MAX_PARALLEL:
+        raise SystemExit(f"{path}: 'parallel' must be between 1 and "
+                         f"{MAX_PARALLEL}, got {parallel}")
+    cfg["parallel"] = parallel
     return cfg
 
 
 CONFIG = load_config()
 MODEL = CONFIG["model"]
+PARALLEL = CONFIG["parallel"]
 
 SYSTEM_PROMPT = (
     "You are an expert C programmer. Reply with exactly one fenced code block "
@@ -709,12 +727,11 @@ GCC_VERSION = gcc_version()
 def default_state():
     return {
         "version": 1,
-        "prompt_index": 0,       # number of the next sample
+        "prompt_index": 0,       # the earliest sample without a record on disk
         "shard_num": 1,          # current file raw_c/shard_NNNNN.jsonl
         "samples_ok": 0,
         "samples_no_c": 0,       # response without a C block (after MAX_EXTRACT_FAILS)
         "samples_bad_c": 0,      # C is present, but gcc compiled neither -O0 nor -O2
-        "extract_fails": 0,      # failed attempts for the current index
         "consecutive_errors": 0,
         "min_backoff": None,     # how long the server asked to wait (Retry-After)
         "last_error": None,
@@ -732,6 +749,8 @@ def load_state():
         st = json.load(f)
     merged = default_state()
     merged.update(st)
+    # written by the sequential collector; retries are per task now
+    merged.pop("extract_fails", None)
     return merged
 
 
@@ -815,119 +834,236 @@ def ask_ollama(prompt, temperature):
 
 
 # ---------------------------------------------------------------------------
+# SHARED STATE FOR PARALLEL WORKERS
+# ---------------------------------------------------------------------------
+
+class Throttle:
+    """One backoff gate for every worker.
+
+    A network failure describes the connection, not one thread: if three
+    workers each retried on their own after the server asked us to slow down,
+    we would send three times the load that caused the failure. A failed
+    request therefore parks all workers until the wait is over."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._backoff = 0.0
+        self._retry_after = 0.0
+        self._until = 0.0
+        self._ok_streak = 0
+
+    def wait(self):
+        """Blocks while the gate is closed."""
+        while True:
+            with self._lock:
+                delay = self._until - time.time()
+            if delay <= 0:
+                return
+            time.sleep(min(delay, 5.0))
+
+    def ok(self):
+        """A request went through. The backoff is cleared only after a few
+        successes in a row: one lane succeeding while another fails (the
+        server is dropping part of the traffic) must not reopen the gate."""
+        with self._lock:
+            self._ok_streak += 1
+            if self._ok_streak >= 3:
+                self._backoff = 0.0
+                self._retry_after = 0.0
+
+    def fail(self, retry_after=None):
+        """Doubles the wait: 5 s, 10 s, 20 s ... up to MAX_BACKOFF, but never
+        less than the server's Retry-After. Returns the wait it applied."""
+        with self._lock:
+            self._backoff = min(max(self._backoff * 2, 5.0), MAX_BACKOFF)
+            if retry_after is not None:
+                self._retry_after = retry_after
+            self._ok_streak = 0
+            wait = max(self._backoff, self._retry_after)
+            self._until = time.time() + wait
+            return wait
+
+
+class Checkpoint:
+    """The state file, the shard file and the counters behind one lock.
+
+    With several workers finishing at once, two appends to the same shard must
+    not interleave, and prompt_index must never move past a hole. It advances
+    only over indices that already have a record on disk, so a crash costs at
+    most the requests that were in flight, and a restart resumes from the
+    lowest unfinished index instead of skipping it."""
+
+    def __init__(self, state):
+        self.state = state
+        self.lock = threading.Lock()
+        self.done = set()   # finished indices not yet absorbed by prompt_index
+
+    def store(self, index, record, kind):
+        """Appends the record and advances the checkpoint.
+        kind: "ok" (usable C), "bad_c" (C present, gcc rejected it),
+        "no_c" (the model answered without a C block)."""
+        with self.lock:
+            size = append_sample(self.state["shard_num"], record)
+            if size >= MAX_SHARD_BYTES:
+                self.state["shard_num"] += 1
+            if kind == "no_c":
+                self.state["samples_no_c"] += 1
+            else:
+                self.state["samples_ok"] += 1
+                if kind == "bad_c":
+                    self.state["samples_bad_c"] += 1
+                self.state["consecutive_errors"] = 0
+                self.state["last_error"] = None
+                self.state["min_backoff"] = None
+            self.done.add(index)
+            while self.state["prompt_index"] in self.done:
+                self.done.discard(self.state["prompt_index"])
+                self.state["prompt_index"] += 1
+            save_state(self.state)
+
+    def note_error(self, message, retry_after=None):
+        with self.lock:
+            self.state["consecutive_errors"] += 1
+            self.state["last_error"] = message
+            if retry_after is not None:
+                self.state["min_backoff"] = retry_after
+
+    def save(self):
+        with self.lock:
+            save_state(self.state)
+
+
+# ---------------------------------------------------------------------------
 # ONE SAMPLE AND THE LOOP
 # ---------------------------------------------------------------------------
 
-def do_one(index, state):
-    """Processes one sample.
-    Returns a status: "ok" (saved), "skip" (saved as a reject,
-    moving on), "net" (network error — we will retry the same index)."""
-    task, variation, prompt = prompt_for(index)
-    temperature = random.uniform(*TEMP_RANGE)
-    log(f"#{index} request (t={temperature:.2f}): {task[:60]}...")
-    try:
-        response, tokens = ask_ollama(prompt, temperature)
-    except requests.HTTPError as e:
-        state["consecutive_errors"] += 1
-        err = "?"
-        if e.response is not None:
-            err = f"HTTP {e.response.status_code}"
-            ra = e.response.headers.get("retry-after")
-            if ra:
-                state["min_backoff"] = float(ra)
-                err += f", Retry-After={float(ra):.0f}s"
-        state["last_error"] = err
-        log(f"#{index} ERROR: {err}")
-        return "net"
-    except Exception as e:
-        state["consecutive_errors"] += 1
-        state["last_error"] = f"{type(e).__name__}: {e}"
-        log(f"#{index} ERROR: {state['last_error']}")
-        return "net"
+def do_one(index, ckpt, throttle):
+    """Processes one sample and commits it. Returns "ok" or "skip".
 
-    c_code = extract_c(response)
-    if c_code is None:
-        state["extract_fails"] += 1
-        log(f"#{index} response has no C block "
-            f"(attempt {state['extract_fails']}/{MAX_EXTRACT_FAILS})")
-        if state["extract_fails"] < MAX_EXTRACT_FAILS:
-            return "net"   # retry the same index
-        # consistently returns no code — record a reject and move on,
-        # otherwise we could get stuck on a "bad" task forever
+    A network error never returns: the task waits out the shared backoff and
+    retries the same index, so a retry keeps its place in the queue."""
+    task, variation, prompt = prompt_for(index)
+    extract_fails = 0
+    while True:
+        throttle.wait()
+        temperature = random.uniform(*TEMP_RANGE)
+        log(f"#{index} request (t={temperature:.2f}): {task[:60]}...")
+        try:
+            response, tokens = ask_ollama(prompt, temperature)
+        except requests.HTTPError as e:
+            err = "?"
+            retry_after = None
+            if e.response is not None:
+                err = f"HTTP {e.response.status_code}"
+                ra = e.response.headers.get("retry-after")
+                if ra:
+                    retry_after = float(ra)
+                    err += f", Retry-After={retry_after:.0f}s"
+            ckpt.note_error(err, retry_after)
+            wait = throttle.fail(retry_after)
+            log(f"#{index} ERROR: {err}; all lanes wait {wait:.0f}s")
+            continue
+        except Exception as e:
+            msg = f"{type(e).__name__}: {e}"
+            ckpt.note_error(msg)
+            wait = throttle.fail()
+            log(f"#{index} ERROR: {msg}; all lanes wait {wait:.0f}s")
+            continue
+
+        throttle.ok()
+        c_code = extract_c(response)
+        if c_code is None:
+            extract_fails += 1
+            log(f"#{index} response has no C block "
+                f"(attempt {extract_fails}/{MAX_EXTRACT_FAILS})")
+            if extract_fails < MAX_EXTRACT_FAILS:
+                continue
+            # consistently returns no code — record a reject and move on,
+            # otherwise we could get stuck on a "bad" task forever
+            record = {
+                "id": index, "ts": now_iso(), "model": MODEL, "gcc": GCC_VERSION,
+                "task": task, "variation": variation,
+                "temperature": round(temperature, 3), "prompt": prompt,
+                "extract_ok": False, "raw_response": response[:20000],
+                "prompt_tokens": tokens,
+                "compile_o0_ok": False, "asm_o0": None, "diag_o0": "no C block",
+                "compile_o2_ok": False, "asm_o2": None, "diag_o2": "no C block",
+            }
+            ckpt.store(index, record, "no_c")
+            log(f"#{index} reject recorded (no C block), moving on")
+            return "skip"
+
+        o0 = compile_c(c_code, "O0")
+        o2 = compile_c(c_code, "O2")
         record = {
             "id": index, "ts": now_iso(), "model": MODEL, "gcc": GCC_VERSION,
             "task": task, "variation": variation,
             "temperature": round(temperature, 3), "prompt": prompt,
-            "extract_ok": False, "raw_response": response[:20000],
+            "extract_ok": True,
+            "c_source": c_code,
             "prompt_tokens": tokens,
-            "compile_o0_ok": False, "asm_o0": None, "diag_o0": "no C block",
-            "compile_o2_ok": False, "asm_o2": None, "diag_o2": "no C block",
+            "compile_o0_ok": o0["ok"], "asm_o0": o0["asm"], "diag_o0": o0["diag"],
+            "compile_o2_ok": o2["ok"], "asm_o2": o2["asm"], "diag_o2": o2["diag"],
         }
-        repair_last_line(shard_path(state["shard_num"]))
-        size = append_sample(state["shard_num"], record)
-        state["samples_no_c"] += 1
-        state["extract_fails"] = 0
-        state["prompt_index"] = index + 1
-        if size >= MAX_SHARD_BYTES:
-            state["shard_num"] += 1
-        save_state(state)
-        log(f"#{index} reject recorded (no C block), moving on")
-        return "skip"
+        bad = not (o0["ok"] or o2["ok"])
+        ckpt.store(index, record, "bad_c" if bad else "ok")
+        if bad:
+            log(f"#{index} C is present, but gcc failed to compile it: "
+                f"{o0['diag'][:200]}")
+        else:
+            n0 = len(o0["asm"].splitlines()) if o0["ok"] else 0
+            n2 = len(o2["asm"].splitlines()) if o2["ok"] else 0
+            log(f"#{index} OK ({tokens} tokens, C lines {len(c_code.splitlines())}, "
+                f"asm -O0 {n0} lines, -O2 {n2} lines)")
+        return "ok"
 
-    o0 = compile_c(c_code, "O0")
-    o2 = compile_c(c_code, "O2")
-    record = {
-        "id": index, "ts": now_iso(), "model": MODEL, "gcc": GCC_VERSION,
-        "task": task, "variation": variation,
-        "temperature": round(temperature, 3), "prompt": prompt,
-        "extract_ok": True,
-        "c_source": c_code,
-        "prompt_tokens": tokens,
-        "compile_o0_ok": o0["ok"], "asm_o0": o0["asm"], "diag_o0": o0["diag"],
-        "compile_o2_ok": o2["ok"], "asm_o2": o2["asm"], "diag_o2": o2["diag"],
-    }
-    repair_last_line(shard_path(state["shard_num"]))
-    size = append_sample(state["shard_num"], record)
-    state["samples_ok"] += 1
-    state["extract_fails"] = 0
-    state["consecutive_errors"] = 0
-    state["last_error"] = None
-    state["min_backoff"] = None
-    if size >= MAX_SHARD_BYTES:
-        state["shard_num"] += 1
-    if not (o0["ok"] or o2["ok"]):
-        state["samples_bad_c"] += 1
-        log(f"#{index} C is present, but gcc failed to compile it: {o0['diag'][:200]}")
-    else:
-        n0 = len(o0["asm"].splitlines()) if o0["ok"] else 0
-        n2 = len(o2["asm"].splitlines()) if o2["ok"] else 0
-        log(f"#{index} OK ({tokens} tokens, C lines {len(c_code.splitlines())}, "
-            f"asm -O0 {n0} lines, -O2 {n2} lines)")
-    state["prompt_index"] = index + 1
-    save_state(state)
-    return "ok"
+
+def worker(work, ckpt, throttle):
+    """One lane: takes an index from the queue, processes it, paces itself."""
+    while True:
+        index = work.get()
+        try:
+            do_one(index, ckpt, throttle)
+        except Exception as e:
+            # a lane must never die silently: collector.sh would restart the
+            # whole process and throw away the other lanes' in-flight requests
+            log(f"#{index} UNEXPECTED: {type(e).__name__}: {e}")
+        finally:
+            work.task_done()
+        time.sleep(PAUSE + random.uniform(*JITTER))
 
 
 def run_forever(state):
-    log(f"=== start/resume: model {MODEL}, continuing from sample "
-        f"#{state['prompt_index']}, {COMBO} prompt combinations in total ===")
-    backoff = 5.0
+    ckpt = Checkpoint(state)
+    throttle = Throttle()
+    # once at startup: the previous process may have died mid-line. Doing it
+    # per record is both redundant and a race between the lanes.
+    repair_last_line(shard_path(state["shard_num"]))
+    work = queue.Queue(maxsize=PARALLEL * 2)
+    for i in range(PARALLEL):
+        threading.Thread(target=worker, args=(work, ckpt, throttle),
+                         name=f"lane-{i + 1}", daemon=True).start()
+    log(f"=== start/resume: model {MODEL}, {PARALLEL} parallel requests, "
+        f"continuing from sample #{state['prompt_index']}, "
+        f"{COMBO} prompt combinations in total ===")
+    next_index = state["prompt_index"]
     last_state_ts = time.time()
-    while True:
-        status = do_one(state["prompt_index"], state)
-        if status in ("ok", "skip"):
-            backoff = 5.0
-            wait = PAUSE + random.uniform(*JITTER)
-        else:
-            # network error: exponential backoff 5s, 10s, 20s ... up to an hour,
-            # but not less than Retry-After if the server sent it
-            backoff = min(backoff * 2, MAX_BACKOFF)
-            wait = max(backoff, state.get("min_backoff") or 0)
-            log(f"waiting {wait:.0f}s before retrying")
-        if time.time() - last_state_ts > STATE_EVERY_SECONDS:
-            save_state(state)
-            last_state_ts = time.time()
-        time.sleep(wait)
+    try:
+        while True:
+            try:
+                work.put(next_index, timeout=1.0)
+            except queue.Full:
+                # all lanes are busy; keep the periodic checkpoint alive
+                if time.time() - last_state_ts > STATE_EVERY_SECONDS:
+                    ckpt.save()
+                    last_state_ts = time.time()
+                continue
+            next_index += 1
+            if time.time() - last_state_ts > STATE_EVERY_SECONDS:
+                ckpt.save()
+                last_state_ts = time.time()
+    finally:
+        ckpt.save()
 
 
 # ---------------------------------------------------------------------------
@@ -1025,7 +1161,8 @@ def main():
         return
 
     if args.once:
-        status = do_one(state["prompt_index"], state)
+        repair_last_line(shard_path(state["shard_num"]))
+        status = do_one(state["prompt_index"], Checkpoint(state), Throttle())
         print(f"status: {status}")
         return
 
