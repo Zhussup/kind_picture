@@ -330,6 +330,23 @@ This is an early research prototype, and the README says so on purpose:
 
 ## Docs
 
+### Figures
+
+Every figure embedded above exists twice, light and dark, in
+[ml/asm/docs/](ml/asm/docs/); the `<picture>` elements pick one by the reader's
+color scheme.
+
+| Figure | Files | What it shows |
+|--------|-------|---------------|
+| Full validation | `eval_full118_{light,dark}.png` | compile rate and behavior match by optimization level, plus the split of all 118 answers into passed / compiled-but-different / did not compile / no `c` block |
+| Epochs | `eval_epochs_{light,dark}.png` | behavior match and compile rate after 1, 2 and 3 epochs of the same run |
+| Probes | `eval_probes_{light,dark}.png` | the same 118 answers scored with one fixed probe list, with per-program probes, and on pairs with two or more probes |
+| Training loss | `training_loss_full_{light,dark}.png` | cross-entropy on assistant tokens for the 2,579-pair run |
+
+The scripts hold no numbers: `plot_eval.py` reads `eval_results/*.json` and
+`*.jsonl`, `plot_training.py` reads a `train_state.json` or a training log, so a
+new run is re-plotted without editing any constant.
+
 - [ml/asm/README.md](ml/asm/README.md) — full pipeline reference: record
   format, leak stripping, differential-testing rules, exit codes, training
   details.
