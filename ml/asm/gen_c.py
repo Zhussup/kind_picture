@@ -12,7 +12,8 @@ What the script does, step by step:
   1. The sample number (0, 1, 2, ...) is deterministically turned into a task
      (task × wording variation; no randomness at all — after a restart
      we continue from exactly the same place).
-  2. The prompt goes to the Ollama API (model beam:cloud), and the response is parsed:
+  2. The prompt goes to the Ollama API (the model from config.json,
+     beam:cloud by default), and the response is parsed:
      exactly one ```c ... ``` block is required.
   3. The code is compiled TWICE: `gcc -O0 -S` and `gcc -O2 -S` — we get
      two listings of the same program (important: you can see how the optimizer
@@ -64,8 +65,36 @@ RAW_DIR = os.path.join(BASE_DIR, "raw_c")               # shards are written her
 STATE_PATH = os.path.join(BASE_DIR, "state_gen_c.json") # checkpoint
 LOG_PATH = os.path.join(BASE_DIR, "gen_c.log")          # log
 
-MODEL = "deepseek-v4.1-flash:cloud"   # temporary swap from beam:cloud
+DEFAULT_MODEL = "beam:cloud"
 HOST = "http://localhost:11434"     # local Ollama daemon (it holds the login)
+CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
+
+
+def load_config(path=CONFIG_PATH):
+    """Reads config.json next to this script.
+
+    A missing file keeps the defaults. A broken file stops the collector
+    instead of silently falling back: collecting a whole shard with a model
+    nobody chose is worse than not collecting at all."""
+    cfg = {"model": DEFAULT_MODEL}
+    if not os.path.exists(path):
+        return cfg
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except json.JSONDecodeError as e:
+        raise SystemExit(f"{path}: not valid JSON ({e})")
+    if not isinstance(data, dict):
+        raise SystemExit(f"{path}: expected a JSON object")
+    model = data.get("model", cfg["model"])
+    if not isinstance(model, str) or not model.strip():
+        raise SystemExit(f"{path}: 'model' must be a non-empty string")
+    cfg["model"] = model.strip()
+    return cfg
+
+
+CONFIG = load_config()
+MODEL = CONFIG["model"]
 
 SYSTEM_PROMPT = (
     "You are an expert C programmer. Reply with exactly one fenced code block "
@@ -880,8 +909,8 @@ def do_one(index, state):
 
 
 def run_forever(state):
-    log(f"=== start/resume: continuing from sample #{state['prompt_index']}, "
-        f"{COMBO} prompt combinations in total ===")
+    log(f"=== start/resume: model {MODEL}, continuing from sample "
+        f"#{state['prompt_index']}, {COMBO} prompt combinations in total ===")
     backoff = 5.0
     last_state_ts = time.time()
     while True:
