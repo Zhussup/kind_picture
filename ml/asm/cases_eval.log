@@ -1,0 +1,13 @@
+[2026-10-22T12:57:41+05:00] epoch-1 done, starting cases eval
+model: Qwen/Qwen3-0.6B + checkpoints/lora-night-20261022/final
+val: 118 pairs, difftest inputs: per program
+cases-by-source: 92 programs, 116/118 pairs have probes
+Loading weights:   0%|          | 0/311 [00:00<?, ?it/s]Loading weights:  17%|█▋        | 54/311 [00:00<00:00, 535.69it/s]Loading weights:  62%|██████▏   | 194/311 [00:00<00:00, 1036.67it/s]Loading weights: 100%|██████████| 311/311 [00:00<00:00, 1189.78it/s]
+[1/118] a1-46-O0: PASS (9.1s)
+[2/118] a1-46-O2: compiled (9.0s)
+[3/118] a1-48-O0: compiled (8.0s)
+[4/118] a1-48-O2: compiled (14.1s)
+[5/118] a1-54-O0: compiled (5.2s)
+[6/118] a1-54-O2: compiled (5.9s)
+[7/118] a1-148-O0: PASS (11.9s)
+[8/118] a1-148-O2: PASS (8.4s)

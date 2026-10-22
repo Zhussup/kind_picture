@@ -79,3 +79,90 @@ val: 118 pairs, difftest inputs: 10
 [76/118] a1-1988-O2: PASS (3.1s)
 [77/118] a1-2085-O0: FAIL (6.8s)
 [78/118] a1-2085-O2: compiled (6.1s)
+[79/118] a1-2131-O0: FAIL (32.5s)
+[80/118] a1-2131-O2: FAIL (29.1s)
+[81/118] a1-2175-O0: FAIL (5.9s)
+[82/118] a1-2175-O2: compiled (4.8s)
+[83/118] a1-2190-O0: FAIL (7.8s)
+[84/118] a1-2190-O2: compiled (6.7s)
+[85/118] a1-2257-O0: compiled (11.2s)
+[86/118] a1-2257-O2: PASS (6.8s)
+[87/118] a1-2311-O0: FAIL (12.1s)
+[88/118] a1-2311-O2: FAIL (9.0s)
+[89/118] a1-2360-O0: compiled (2.6s)
+[90/118] a1-2360-O2: compiled (2.5s)
+[91/118] a1-2426-O0: FAIL (7.3s)
+[92/118] a1-2426-O2: PASS (7.6s)
+[93/118] a1-2478-O0: compiled (8.9s)
+[94/118] a1-2478-O2: compiled (7.2s)
+[95/118] a1-2571-O0: compiled (13.0s)
+[96/118] a1-2571-O2: FAIL (15.1s)
+[97/118] a1-2629-O0: compiled (9.0s)
+[98/118] a1-2629-O2: FAIL (12.4s)
+[99/118] a1-2682-O0: FAIL (25.6s)
+[100/118] a1-2682-O2: FAIL (20.6s)
+[101/118] a1-2769-O0: compiled (9.4s)
+[102/118] a1-2769-O2: compiled (11.5s)
+[103/118] a1-2790-O0: FAIL (35.2s)
+[104/118] a1-2790-O2: FAIL (27.5s)
+[105/118] a1-2794-O0: FAIL (31.7s)
+[106/118] a1-2794-O2: FAIL (28.1s)
+[107/118] a1-2809-O0: compiled (11.6s)
+[108/118] a1-2809-O2: compiled (15.1s)
+[109/118] a1-2816-O0: FAIL (37.7s)
+[110/118] a1-2816-O2: FAIL (33.4s)
+[111/118] a1-2820-O0: PASS (18.1s)
+[112/118] a1-2820-O2: PASS (8.6s)
+[113/118] a1-2854-O0: compiled (7.3s)
+[114/118] a1-2854-O2: compiled (6.2s)
+[115/118] a1-2868-O0: compiled (6.5s)
+[116/118] a1-2868-O2: compiled (5.3s)
+[117/118] a1-2903-O0: compiled (2.7s)
+[118/118] a1-2903-O2: compiled (2.7s)
+
+{
+  "model": "Qwen/Qwen3-0.6B",
+  "adapter": "checkpoints/lora-night-20261022/epoch-1",
+  "val": "/tmp/val118.jsonl",
+  "n": 118,
+  "compiled": 86,
+  "passed": 19,
+  "ref_errors": 0,
+  "truncated": 12,
+  "output_kinds": {
+    "c": 118
+  },
+  "compile_rate": 0.7288,
+  "pass_rate": 0.161,
+  "by_opt": {
+    "O0": {
+      "n": 59,
+      "compile_rate": 0.6949,
+      "pass_rate": 0.1695
+    },
+    "O2": {
+      "n": 59,
+      "compile_rate": 0.7627,
+      "pass_rate": 0.1525
+    }
+  },
+  "decoding": {
+    "do_sample": false,
+    "max_new_tokens": 1024
+  },
+  "cases": "default",
+  "elapsed_seconds": 1327.6,
+  "ts": "2026-10-22T12:57:41+05:00"
+}
+
+predictions: /home/zhus/Desktop/projects/ml/kind_picture/ml/asm/eval_results/predictions_night-epoch1-20261022-123534.jsonl
+summary:     /home/zhus/Desktop/projects/ml/kind_picture/ml/asm/eval_results/summary_night-epoch1-20261022-123534.json
+model: Qwen/Qwen3-0.6B + checkpoints/lora-night-20261022/epoch-2
+val: 118 pairs, difftest inputs: 10
+Loading weights:   0%|          | 0/311 [00:00<?, ?it/s]Loading weights:   0%|          | 1/311 [00:00<01:16,  4.06it/s]Loading weights:  21%|██        | 65/311 [00:00<00:01, 234.05it/s]Loading weights:  37%|███▋      | 116/311 [00:00<00:00, 327.28it/s]Loading weights:  60%|█████▉    | 186/311 [00:00<00:00, 448.31it/s]Loading weights:  77%|███████▋  | 240/311 [00:00<00:00, 465.66it/s]Loading weights:  95%|█████████▌| 296/311 [00:00<00:00, 491.99it/s]Loading weights: 100%|██████████| 311/311 [00:00<00:00, 388.16it/s]
+[1/118] a1-46-O0: compiled (9.2s)
+[2/118] a1-46-O2: compiled (9.0s)
+[3/118] a1-48-O0: PASS (10.2s)
+[4/118] a1-48-O2: compiled (25.0s)
+[5/118] a1-54-O0: compiled (5.1s)
+[6/118] a1-54-O2: compiled (5.0s)
