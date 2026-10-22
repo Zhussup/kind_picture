@@ -64,7 +64,7 @@ RAW_DIR = os.path.join(BASE_DIR, "raw_c")               # shards are written her
 STATE_PATH = os.path.join(BASE_DIR, "state_gen_c.json") # checkpoint
 LOG_PATH = os.path.join(BASE_DIR, "gen_c.log")          # log
 
-MODEL = "beam:cloud"
+MODEL = "deepseek-v4.1-flash:cloud"   # temporary swap from beam:cloud
 HOST = "http://localhost:11434"     # local Ollama daemon (it holds the login)
 
 SYSTEM_PROMPT = (
