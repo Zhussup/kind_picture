@@ -1,0 +1,9 @@
+model: Qwen/Qwen3-0.6B + checkpoints/lora-night-20261022/epoch-1
+val: 118 pairs, difftest inputs: 10
+Loading weights:   0%|          | 0/311 [00:00<?, ?it/s]Loading weights:   0%|          | 1/311 [00:00<00:53,  5.84it/s]Loading weights:   1%|          | 2/311 [00:00<00:54,  5.67it/s]Loading weights:  11%|█         | 33/311 [00:00<00:02, 100.75it/s]Loading weights:  23%|██▎       | 72/311 [00:00<00:01, 188.23it/s]Loading weights:  80%|███████▉  | 248/311 [00:00<00:00, 663.97it/s]Loading weights: 100%|██████████| 311/311 [00:00<00:00, 428.53it/s]
+[1/118] a1-46-O0: compiled (7.5s)
+[2/118] a1-46-O2: PASS (5.4s)
+[3/118] a1-48-O0: compiled (4.5s)
+[4/118] a1-48-O2: compiled (10.0s)
+[5/118] a1-54-O0: compiled (3.3s)
+[6/118] a1-54-O2: compiled (3.6s)

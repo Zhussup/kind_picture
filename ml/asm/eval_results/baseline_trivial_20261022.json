@@ -1,0 +1,26 @@
+{
+  "val": "/tmp/val118.jsonl",
+  "n": 118,
+  "probes": 10,
+  "stubs": {
+    "noop": {
+      "passed": 6,
+      "compiled": 118,
+      "pass_rate": 0.0508,
+      "ids": [
+        "a1-1882-O0",
+        "a1-1882-O2",
+        "a1-2257-O0",
+        "a1-2257-O2",
+        "a1-2682-O0",
+        "a1-2682-O2"
+      ]
+    },
+    "echo": {
+      "passed": 0,
+      "compiled": 118,
+      "pass_rate": 0.0,
+      "ids": []
+    }
+  }
+}
