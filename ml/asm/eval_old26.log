@@ -1,0 +1,67 @@
+model: Qwen/Qwen3-0.6B + checkpoints/lora-night-20261022/final
+val: 26 pairs, difftest inputs: 10
+Loading weights:   0%|          | 0/311 [00:00<?, ?it/s]Loading weights:  30%|██▉       | 93/311 [00:00<00:00, 914.96it/s]Loading weights:  79%|███████▉  | 247/311 [00:00<00:00, 1278.52it/s]Loading weights: 100%|██████████| 311/311 [00:00<00:00, 1289.24it/s]
+[1/26] a1-46-O0: PASS (6.3s)
+[2/26] a1-46-O2: compiled (6.1s)
+[3/26] a1-48-O0: compiled (5.7s)
+[4/26] a1-48-O2: compiled (8.7s)
+[5/26] a1-54-O0: compiled (3.6s)
+[6/26] a1-54-O2: compiled (4.0s)
+[7/26] a1-148-O0: PASS (8.4s)
+[8/26] a1-148-O2: PASS (6.0s)
+[9/26] a1-178-O0: FAIL (6.6s)
+[10/26] a1-178-O2: PASS (9.0s)
+[11/26] a1-198-O0: FAIL (5.4s)
+[12/26] a1-198-O2: compiled (3.3s)
+[13/26] a1-338-O0: compiled (5.9s)
+[14/26] a1-338-O2: PASS (6.2s)
+[15/26] a1-358-O0: compiled (4.5s)
+[16/26] a1-358-O2: compiled (4.1s)
+[17/26] a1-424-O0: PASS (9.2s)
+[18/26] a1-424-O2: compiled (10.5s)
+[19/26] a1-439-O0: FAIL (27.4s)
+[20/26] a1-439-O2: FAIL (23.7s)
+[21/26] a1-487-O0: compiled (15.8s)
+[22/26] a1-487-O2: compiled (12.4s)
+[23/26] a1-488-O0: compiled (12.2s)
+[24/26] a1-488-O2: compiled (12.4s)
+[25/26] a1-536-O0: compiled (7.3s)
+[26/26] a1-536-O2: compiled (5.6s)
+
+{
+  "model": "Qwen/Qwen3-0.6B",
+  "adapter": "checkpoints/lora-night-20261022/final",
+  "val": "/tmp/val_old26.jsonl",
+  "n": 26,
+  "compiled": 22,
+  "passed": 6,
+  "ref_errors": 0,
+  "truncated": 0,
+  "output_kinds": {
+    "c": 26
+  },
+  "compile_rate": 0.8462,
+  "pass_rate": 0.2308,
+  "by_opt": {
+    "O0": {
+      "n": 13,
+      "compile_rate": 0.7692,
+      "pass_rate": 0.2308
+    },
+    "O2": {
+      "n": 13,
+      "compile_rate": 0.9231,
+      "pass_rate": 0.2308
+    }
+  },
+  "decoding": {
+    "do_sample": false,
+    "max_new_tokens": 1024
+  },
+  "cases": "default",
+  "elapsed_seconds": 253.9,
+  "ts": "2026-10-22T10:59:31+05:00"
+}
+
+predictions: /home/zhus/Desktop/projects/ml/kind_picture/ml/asm/eval_results/predictions_night-final-old26-20261022-105517.jsonl
+summary:     /home/zhus/Desktop/projects/ml/kind_picture/ml/asm/eval_results/summary_night-final-old26-20261022-105517.json

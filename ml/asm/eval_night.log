@@ -1,0 +1,159 @@
+model: Qwen/Qwen3-0.6B + checkpoints/lora-night-20261022/final
+val: 118 pairs, difftest inputs: 10
+Loading weights:   0%|          | 0/311 [00:00<?, ?it/s]Loading weights:   0%|          | 1/311 [00:00<01:59,  2.58it/s]Loading weights:   9%|▊         | 27/311 [00:00<00:04, 70.25it/s]Loading weights:  16%|█▌        | 50/311 [00:00<00:02, 112.37it/s]Loading weights:  25%|██▍       | 77/311 [00:00<00:01, 155.13it/s]Loading weights:  32%|███▏      | 101/311 [00:00<00:01, 178.40it/s]Loading weights:  41%|████      | 126/311 [00:00<00:00, 193.90it/s]Loading weights:  49%|████▊     | 151/311 [00:01<00:00, 209.38it/s]Loading weights:  57%|█████▋    | 177/311 [00:01<00:00, 223.14it/s]Loading weights:  65%|██████▍   | 201/311 [00:01<00:00, 227.84it/s]Loading weights:  72%|███████▏  | 225/311 [00:01<00:00, 228.89it/s]Loading weights:  80%|████████  | 249/311 [00:01<00:00, 214.17it/s]Loading weights:  99%|█████████▉| 309/311 [00:01<00:00, 321.41it/s]Loading weights: 100%|██████████| 311/311 [00:01<00:00, 200.61it/s]
+[1/118] a1-46-O0: PASS (13.0s)
+[2/118] a1-46-O2: compiled (12.0s)
+[3/118] a1-48-O0: compiled (9.5s)
+[4/118] a1-48-O2: compiled (14.8s)
+[5/118] a1-54-O0: compiled (5.3s)
+[6/118] a1-54-O2: compiled (6.6s)
+[7/118] a1-148-O0: PASS (13.6s)
+[8/118] a1-148-O2: PASS (10.0s)
+[9/118] a1-178-O0: FAIL (10.2s)
+[10/118] a1-178-O2: PASS (13.7s)
+[11/118] a1-198-O0: FAIL (9.1s)
+[12/118] a1-198-O2: compiled (5.6s)
+[13/118] a1-338-O0: compiled (5.5s)
+[14/118] a1-338-O2: PASS (5.7s)
+[15/118] a1-358-O0: compiled (4.0s)
+[16/118] a1-358-O2: compiled (3.9s)
+[17/118] a1-424-O0: PASS (8.8s)
+[18/118] a1-424-O2: compiled (10.0s)
+[19/118] a1-439-O0: FAIL (27.3s)
+[20/118] a1-439-O2: FAIL (23.2s)
+[21/118] a1-487-O0: compiled (15.6s)
+[22/118] a1-487-O2: compiled (12.0s)
+[23/118] a1-488-O0: compiled (11.4s)
+[24/118] a1-488-O2: compiled (12.0s)
+[25/118] a1-536-O0: compiled (7.3s)
+[26/118] a1-536-O2: compiled (5.7s)
+[27/118] a1-716-O0: compiled (8.8s)
+[28/118] a1-716-O2: compiled (10.2s)
+[29/118] a1-782-O0: compiled (4.3s)
+[30/118] a1-782-O2: compiled (7.1s)
+[31/118] a1-784-O0: compiled (10.1s)
+[32/118] a1-784-O2: compiled (6.4s)
+[33/118] a1-809-O0: PASS (8.0s)
+[34/118] a1-809-O2: PASS (7.8s)
+[35/118] a1-841-O0: PASS (8.1s)
+[36/118] a1-841-O2: compiled (7.5s)
+[37/118] a1-888-O0: PASS (3.5s)
+[38/118] a1-888-O2: PASS (3.5s)
+[39/118] a1-913-O0: compiled (9.7s)
+[40/118] a1-913-O2: FAIL (9.4s)
+[41/118] a1-997-O0: compiled (5.9s)
+[42/118] a1-997-O2: compiled (7.0s)
+[43/118] a1-1155-O0: FAIL (32.1s)
+[44/118] a1-1155-O2: FAIL (20.6s)
+[45/118] a1-1265-O0: PASS (8.2s)
+[46/118] a1-1265-O2: PASS (7.5s)
+[47/118] a1-1358-O0: compiled (8.5s)
+[48/118] a1-1358-O2: compiled (7.8s)
+[49/118] a1-1375-O0: FAIL (5.6s)
+[50/118] a1-1375-O2: compiled (5.1s)
+[51/118] a1-1383-O0: compiled (4.8s)
+[52/118] a1-1383-O2: compiled (4.1s)
+[53/118] a1-1454-O0: compiled (4.1s)
+[54/118] a1-1454-O2: compiled (3.7s)
+[55/118] a1-1500-O0: PASS (5.0s)
+[56/118] a1-1500-O2: PASS (5.9s)
+[57/118] a1-1567-O0: FAIL (11.3s)
+[58/118] a1-1567-O2: compiled (10.0s)
+[59/118] a1-1592-O0: FAIL (38.1s)
+[60/118] a1-1592-O2: FAIL (30.8s)
+[61/118] a1-1704-O0: compiled (12.3s)
+[62/118] a1-1704-O2: compiled (12.6s)
+[63/118] a1-1721-O0: PASS (8.5s)
+[64/118] a1-1721-O2: compiled (8.1s)
+[65/118] a1-1729-O0: PASS (3.9s)
+[66/118] a1-1729-O2: PASS (3.8s)
+[67/118] a1-1734-O0: PASS (4.9s)
+[68/118] a1-1734-O2: PASS (4.5s)
+[69/118] a1-1816-O0: PASS (11.5s)
+[70/118] a1-1816-O2: PASS (8.8s)
+[71/118] a1-1828-O0: FAIL (42.1s)
+[72/118] a1-1828-O2: FAIL (22.1s)
+[73/118] a1-1882-O0: PASS (11.7s)
+[74/118] a1-1882-O2: PASS (11.4s)
+[75/118] a1-1988-O0: PASS (3.1s)
+[76/118] a1-1988-O2: PASS (3.0s)
+[77/118] a1-2085-O0: compiled (7.8s)
+[78/118] a1-2085-O2: compiled (9.4s)
+[79/118] a1-2131-O0: FAIL (14.7s)
+[80/118] a1-2131-O2: FAIL (12.9s)
+[81/118] a1-2175-O0: FAIL (6.1s)
+[82/118] a1-2175-O2: compiled (5.1s)
+[83/118] a1-2190-O0: FAIL (8.3s)
+[84/118] a1-2190-O2: compiled (8.3s)
+[85/118] a1-2257-O0: FAIL (10.5s)
+[86/118] a1-2257-O2: compiled (10.6s)
+[87/118] a1-2311-O0: FAIL (9.4s)
+[88/118] a1-2311-O2: FAIL (11.0s)
+[89/118] a1-2360-O0: compiled (2.9s)
+[90/118] a1-2360-O2: compiled (3.3s)
+[91/118] a1-2426-O0: FAIL (7.5s)
+[92/118] a1-2426-O2: FAIL (8.7s)
+[93/118] a1-2478-O0: compiled (8.6s)
+[94/118] a1-2478-O2: compiled (6.1s)
+[95/118] a1-2571-O0: compiled (13.1s)
+[96/118] a1-2571-O2: FAIL (13.2s)
+[97/118] a1-2629-O0: FAIL (8.9s)
+[98/118] a1-2629-O2: FAIL (12.6s)
+[99/118] a1-2682-O0: FAIL (20.9s)
+[100/118] a1-2682-O2: FAIL (16.3s)
+[101/118] a1-2769-O0: FAIL (10.5s)
+[102/118] a1-2769-O2: compiled (8.9s)
+[103/118] a1-2790-O0: FAIL (33.8s)
+[104/118] a1-2790-O2: FAIL (18.6s)
+[105/118] a1-2794-O0: FAIL (31.4s)
+[106/118] a1-2794-O2: FAIL (28.3s)
+[107/118] a1-2809-O0: compiled (17.6s)
+[108/118] a1-2809-O2: compiled (14.3s)
+[109/118] a1-2816-O0: FAIL (31.4s)
+[110/118] a1-2816-O2: FAIL (34.6s)
+[111/118] a1-2820-O0: FAIL (13.7s)
+[112/118] a1-2820-O2: PASS (11.9s)
+[113/118] a1-2854-O0: compiled (8.5s)
+[114/118] a1-2854-O2: compiled (6.9s)
+[115/118] a1-2868-O0: compiled (8.9s)
+[116/118] a1-2868-O2: compiled (7.8s)
+[117/118] a1-2903-O0: compiled (3.1s)
+[118/118] a1-2903-O2: compiled (6.7s)
+
+{
+  "model": "Qwen/Qwen3-0.6B",
+  "adapter": "checkpoints/lora-night-20261022/final",
+  "val": "/home/zhus/Desktop/projects/ml/kind_picture/ml/asm/dataset/val.jsonl",
+  "n": 118,
+  "compiled": 83,
+  "passed": 27,
+  "ref_errors": 0,
+  "truncated": 8,
+  "output_kinds": {
+    "c": 118
+  },
+  "compile_rate": 0.7034,
+  "pass_rate": 0.2288,
+  "by_opt": {
+    "O0": {
+      "n": 59,
+      "compile_rate": 0.6441,
+      "pass_rate": 0.2373
+    },
+    "O2": {
+      "n": 59,
+      "compile_rate": 0.7627,
+      "pass_rate": 0.2203
+    }
+  },
+  "decoding": {
+    "do_sample": false,
+    "max_new_tokens": 1024
+  },
+  "cases": "default",
+  "elapsed_seconds": 1392.7,
+  "ts": "2026-10-22T10:17:22+05:00"
+}
+
+predictions: /home/zhus/Desktop/projects/ml/kind_picture/ml/asm/eval_results/predictions_night-final-20261022-095409.jsonl
+summary:     /home/zhus/Desktop/projects/ml/kind_picture/ml/asm/eval_results/summary_night-final-20261022-095409.json

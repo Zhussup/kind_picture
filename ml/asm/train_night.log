@@ -1,0 +1,114 @@
+pairs in file: 5349; used: 2579; longer than the limit: 2770; empty answer: 0
+tokens (all): p50=2115, p90=4905, max=19857
+max_seq_len=2048, LoRA r=16, lr=0.0002, epochs=3, grad_accum=8
+Loading weights:   0%|          | 0/311 [00:00<?, ?it/s]Loading weights:   0%|          | 1/311 [00:00<01:05,  4.72it/s]Loading weights:   1%|          | 2/311 [00:00<01:23,  3.70it/s]Loading weights:   9%|▉         | 28/311 [00:00<00:04, 63.99it/s]Loading weights:  16%|█▌        | 49/311 [00:00<00:02, 98.66it/s]Loading weights:  25%|██▌       | 78/311 [00:00<00:01, 147.59it/s]Loading weights:  36%|███▌      | 111/311 [00:00<00:01, 194.69it/s]Loading weights:  46%|████▋     | 144/311 [00:01<00:00, 230.48it/s]Loading weights:  55%|█████▍    | 171/311 [00:01<00:00, 237.10it/s]Loading weights:  64%|██████▎   | 198/311 [00:01<00:00, 236.34it/s]Loading weights:  73%|███████▎  | 226/311 [00:01<00:00, 245.61it/s]Loading weights:  83%|████████▎ | 257/311 [00:01<00:00, 262.86it/s]Loading weights:  92%|█████████▏| 285/311 [00:01<00:00, 233.15it/s]Loading weights: 100%|██████████| 311/311 [00:01<00:00, 184.26it/s]
+trainable params: 10,092,544 || all params: 606,142,464 || trainable%: 1.6650
+epoch 1 step 10/969 loss=0.4977 lr=1.10e-04 elapsed=86.3s
+epoch 1 step 20/969 loss=0.4066 lr=2.00e-04 elapsed=168.3s
+epoch 1 step 30/969 loss=0.2369 lr=2.00e-04 elapsed=254.1s
+epoch 1 step 40/969 loss=0.2220 lr=2.00e-04 elapsed=331.2s
+epoch 1 step 50/969 loss=0.3471 lr=2.00e-04 elapsed=406.7s
+epoch 1 step 60/969 loss=0.2381 lr=1.99e-04 elapsed=489.0s
+epoch 1 step 70/969 loss=0.2919 lr=1.99e-04 elapsed=572.0s
+epoch 1 step 80/969 loss=0.3288 lr=1.98e-04 elapsed=659.4s
+epoch 1 step 90/969 loss=0.2417 lr=1.97e-04 elapsed=741.4s
+epoch 1 step 100/969 loss=0.1624 lr=1.97e-04 elapsed=823.0s
+epoch 1 step 110/969 loss=0.2367 lr=1.96e-04 elapsed=908.9s
+epoch 1 step 120/969 loss=0.2128 lr=1.95e-04 elapsed=995.1s
+epoch 1 step 130/969 loss=0.1317 lr=1.94e-04 elapsed=1078.8s
+epoch 1 step 140/969 loss=0.2059 lr=1.93e-04 elapsed=1163.7s
+epoch 1 step 150/969 loss=0.2632 lr=1.91e-04 elapsed=1244.7s
+epoch 1 step 160/969 loss=0.2727 lr=1.90e-04 elapsed=1330.1s
+epoch 1 step 170/969 loss=0.2013 lr=1.89e-04 elapsed=1409.5s
+epoch 1 step 180/969 loss=0.1932 lr=1.87e-04 elapsed=1495.3s
+epoch 1 step 190/969 loss=0.1592 lr=1.85e-04 elapsed=1578.9s
+epoch 1 step 200/969 loss=0.2677 lr=1.84e-04 elapsed=1664.3s
+epoch 1 step 210/969 loss=0.2079 lr=1.82e-04 elapsed=1749.9s
+epoch 1 step 220/969 loss=0.2129 lr=1.80e-04 elapsed=1834.7s
+epoch 1 step 230/969 loss=0.2036 lr=1.78e-04 elapsed=1921.7s
+epoch 1 step 240/969 loss=0.1759 lr=1.76e-04 elapsed=2010.9s
+epoch 1 step 250/969 loss=0.2203 lr=1.74e-04 elapsed=2092.0s
+epoch 1 step 260/969 loss=0.1103 lr=1.72e-04 elapsed=2170.2s
+epoch 1 step 270/969 loss=0.1530 lr=1.69e-04 elapsed=2251.6s
+epoch 1 step 280/969 loss=0.1071 lr=1.67e-04 elapsed=2332.9s
+epoch 1 step 290/969 loss=0.2173 lr=1.65e-04 elapsed=2413.0s
+epoch 1 step 300/969 loss=0.1753 lr=1.62e-04 elapsed=2502.8s
+epoch 1 step 310/969 loss=0.2359 lr=1.59e-04 elapsed=2586.1s
+epoch 1 step 320/969 loss=0.1004 lr=1.57e-04 elapsed=2670.9s
+epoch 1 step 323/969 loss=0.1847 lr=1.56e-04 elapsed=2693.9s
+--- epoch 1: loss=0.2292, 2694s ---
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+adapter saved: /home/zhus/Desktop/projects/ml/kind_picture/ml/asm/checkpoints/lora-night-20261022/epoch-1
+epoch 2 step 330/969 loss=0.1020 lr=1.54e-04 elapsed=2748.9s
+epoch 2 step 340/969 loss=0.1056 lr=1.51e-04 elapsed=2826.0s
+epoch 2 step 350/969 loss=0.1612 lr=1.49e-04 elapsed=2914.8s
+epoch 2 step 360/969 loss=0.1340 lr=1.46e-04 elapsed=2998.8s
+epoch 2 step 370/969 loss=0.2120 lr=1.43e-04 elapsed=3082.9s
+epoch 2 step 380/969 loss=0.1119 lr=1.40e-04 elapsed=3164.0s
+epoch 2 step 390/969 loss=0.1018 lr=1.37e-04 elapsed=3250.6s
+epoch 2 step 400/969 loss=0.1506 lr=1.34e-04 elapsed=3330.5s
+epoch 2 step 410/969 loss=0.0933 lr=1.31e-04 elapsed=3412.2s
+epoch 2 step 420/969 loss=0.1370 lr=1.28e-04 elapsed=3496.7s
+epoch 2 step 430/969 loss=0.0909 lr=1.25e-04 elapsed=3573.3s
+epoch 2 step 440/969 loss=0.1101 lr=1.22e-04 elapsed=3658.8s
+epoch 2 step 450/969 loss=0.0658 lr=1.19e-04 elapsed=3740.5s
+epoch 2 step 460/969 loss=0.0856 lr=1.16e-04 elapsed=3820.2s
+epoch 2 step 470/969 loss=0.1075 lr=1.13e-04 elapsed=3905.0s
+epoch 2 step 480/969 loss=0.1855 lr=1.10e-04 elapsed=3987.8s
+epoch 2 step 490/969 loss=0.0925 lr=1.06e-04 elapsed=4068.5s
+epoch 2 step 500/969 loss=0.1276 lr=1.03e-04 elapsed=4157.4s
+epoch 2 step 510/969 loss=0.0427 lr=1.00e-04 elapsed=4238.5s
+epoch 2 step 520/969 loss=0.2298 lr=9.70e-05 elapsed=4328.1s
+epoch 2 step 530/969 loss=0.0799 lr=9.39e-05 elapsed=4416.3s
+epoch 2 step 540/969 loss=0.1499 lr=9.07e-05 elapsed=4500.5s
+epoch 2 step 550/969 loss=0.0778 lr=8.76e-05 elapsed=4583.4s
+epoch 2 step 560/969 loss=0.1130 lr=8.46e-05 elapsed=4667.8s
+epoch 2 step 570/969 loss=0.0685 lr=8.15e-05 elapsed=4753.5s
+epoch 2 step 580/969 loss=0.1082 lr=7.85e-05 elapsed=4839.0s
+epoch 2 step 590/969 loss=0.0275 lr=7.55e-05 elapsed=4925.6s
+epoch 2 step 600/969 loss=0.0866 lr=7.25e-05 elapsed=5012.7s
+epoch 2 step 610/969 loss=0.1091 lr=6.96e-05 elapsed=5095.2s
+epoch 2 step 620/969 loss=0.0687 lr=6.67e-05 elapsed=5180.1s
+epoch 2 step 630/969 loss=0.0837 lr=6.38e-05 elapsed=5265.0s
+epoch 2 step 640/969 loss=0.0926 lr=6.10e-05 elapsed=5345.6s
+epoch 2 step 646/969 loss=0.1276 lr=5.93e-05 elapsed=5384.5s
+--- epoch 2: loss=0.1029, 2690s ---
+adapter saved: /home/zhus/Desktop/projects/ml/kind_picture/ml/asm/checkpoints/lora-night-20261022/epoch-2
+epoch 3 step 650/969 loss=0.0907 lr=5.82e-05 elapsed=5420.3s
+epoch 3 step 660/969 loss=0.0808 lr=5.55e-05 elapsed=5498.7s
+epoch 3 step 670/969 loss=0.0369 lr=5.29e-05 elapsed=5579.6s
+epoch 3 step 680/969 loss=0.1248 lr=5.03e-05 elapsed=5665.3s
+epoch 3 step 690/969 loss=0.0499 lr=4.77e-05 elapsed=5746.2s
+epoch 3 step 700/969 loss=0.0854 lr=4.52e-05 elapsed=5827.8s
+epoch 3 step 710/969 loss=0.0963 lr=4.28e-05 elapsed=5910.6s
+epoch 3 step 720/969 loss=0.0756 lr=4.05e-05 elapsed=5986.1s
+epoch 3 step 730/969 loss=0.0820 lr=3.82e-05 elapsed=6066.9s
+epoch 3 step 740/969 loss=0.0590 lr=3.60e-05 elapsed=6155.4s
+epoch 3 step 750/969 loss=0.0774 lr=3.39e-05 elapsed=6242.9s
+epoch 3 step 760/969 loss=0.0309 lr=3.18e-05 elapsed=6329.0s
+epoch 3 step 770/969 loss=0.0994 lr=2.99e-05 elapsed=6414.6s
+epoch 3 step 780/969 loss=0.0773 lr=2.80e-05 elapsed=6493.0s
+epoch 3 step 790/969 loss=0.0813 lr=2.62e-05 elapsed=6578.0s
+epoch 3 step 800/969 loss=0.0512 lr=2.45e-05 elapsed=6661.6s
+epoch 3 step 810/969 loss=0.0840 lr=2.29e-05 elapsed=6751.3s
+epoch 3 step 820/969 loss=0.0243 lr=2.13e-05 elapsed=6828.9s
+epoch 3 step 830/969 loss=0.0562 lr=1.99e-05 elapsed=6910.4s
+epoch 3 step 840/969 loss=0.0797 lr=1.85e-05 elapsed=6986.3s
+epoch 3 step 850/969 loss=0.0756 lr=1.73e-05 elapsed=7069.7s
+epoch 3 step 860/969 loss=0.0836 lr=1.61e-05 elapsed=7149.5s
+epoch 3 step 870/969 loss=0.0682 lr=1.51e-05 elapsed=7229.6s
+epoch 3 step 880/969 loss=0.0475 lr=1.41e-05 elapsed=7318.5s
+epoch 3 step 890/969 loss=0.0547 lr=1.32e-05 elapsed=7404.1s
+epoch 3 step 900/969 loss=0.0320 lr=1.25e-05 elapsed=7494.9s
+epoch 3 step 910/969 loss=0.0686 lr=1.18e-05 elapsed=7578.2s
+epoch 3 step 920/969 loss=0.0461 lr=1.12e-05 elapsed=7661.0s
+epoch 3 step 930/969 loss=0.0466 lr=1.08e-05 elapsed=7744.8s
+epoch 3 step 940/969 loss=0.0231 lr=1.04e-05 elapsed=7829.7s
+epoch 3 step 950/969 loss=0.0805 lr=1.02e-05 elapsed=7912.6s
+epoch 3 step 960/969 loss=0.0578 lr=1.00e-05 elapsed=7997.2s
+epoch 3 step 969/969 loss=0.0150 lr=1.00e-05 elapsed=8069.8s
+--- epoch 3: loss=0.0568, 2685s ---
+adapter saved: /home/zhus/Desktop/projects/ml/kind_picture/ml/asm/checkpoints/lora-night-20261022/epoch-3
+
+done: /home/zhus/Desktop/projects/ml/kind_picture/ml/asm/checkpoints/lora-night-20261022/final
+training log: /home/zhus/Desktop/projects/ml/kind_picture/ml/asm/checkpoints/lora-night-20261022/train_state.json

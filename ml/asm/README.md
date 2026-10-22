@@ -57,6 +57,9 @@ model answer (C) ──► difftest.py: original C vs predicted C ──► verd
 - `raw_c/` — output shards of `gen_c.py` (runtime data).
 - `dataset/` — built `train.jsonl`, `val.jsonl`, `stats.json` (runtime data).
 - `checkpoints/` — LoRA adapters and `train_state.json` (runtime data).
+- `eval_results/` — `predictions_*.jsonl` and `summary_*.json` per evaluation
+  run: one row per validation pair, every answer with its compile and
+  differential-test verdict.
 - `docs/` — figures used by this README.
 - `state_gen_c.json`, `gen_c.log`, `gen_c.out`, `gen_c.pid` — checkpoint, log,
   wrapper output and pid file of the running collector (runtime data).
@@ -64,7 +67,7 @@ model answer (C) ──► difftest.py: original C vs predicted C ──► verd
 ## One sample of `gen_c.py`, step by step
 
 1. `index → (task, wording variation)` is deterministic, same scheme as
-   `dset/collector.py`: 72 tasks × 10 variations = **720 combinations**.
+   `dset/collector.py`: 406 tasks × 32 variations = **12,992 combinations**.
    Once the space is exhausted the prompts repeat, but the answers differ
    (the temperature is random on every request).
 2. A request goes to `/api/chat` (model `beam:cloud`). The system prompt
@@ -176,18 +179,25 @@ set to `-100`, which cross-entropy ignores.
        width="840">
 </picture>
 
-The figure is the **full run**: 723 pairs (the pairs that fit 2,048 tokens),
-2 epochs, 182 optimizer steps. Loss falls from 0.81 at the first step to 0.06
-at the last (epoch averages: 0.32 and 0.14). `plot_training.py` renders the
-figure with **Matplotlib** (3.11.2) from `train_state.json` or a training log
-and writes the light and dark PNGs to `docs/`.
+The figure is the **first full run**: 723 pairs (the pairs that fit 2,048
+tokens), 2 epochs, 182 optimizer steps. Loss falls from 0.81 at the first step
+to 0.06 at the last (epoch averages: 0.32 and 0.14). `plot_training.py` renders
+the figure with **Matplotlib** (3.11.2) from `train_state.json` or a training
+log and writes the light and dark PNGs to `docs/`.
 
-On the 26-pair validation set the adapter answers with C code in all 26 cases
-and compiles 19 (73.1%, up from 7 for the base model). Behavior match is still
-0%: the model has learned the shape of the programs and the API calls, but not
-yet the exact algorithms. An earlier smoke run (60 short pairs, 3 epochs)
-validated the training loop and is kept as `docs/training_loss_light.png` /
-`docs/training_loss_dark.png`.
+The **second full run** (`--tag night-20261022`) used 2,579 pairs, 3 epochs and
+969 optimizer steps over 2h15m on the RTX 3050; loss went from 0.60 at the first
+step to 0.015 at the last (epoch averages: 0.229, 0.103, 0.057). Its adapter
+lives in `checkpoints/lora-night-20261022/` as `epoch-1`, `epoch-2`, `epoch-3`
+and `final`; there is no resume support, so a run interrupted before an epoch
+boundary must restart.
+
+On the 26-pair validation set the second adapter answers with C code in all 26
+cases, compiles 22 (84.6%, up from 19 for the first adapter) and matches the
+reference behavior on 6 (23.1%, up from 0%). On the full 118-pair split it
+compiles 83 (70.3%) and matches behavior on 27 (22.9%). An earlier smoke run
+(60 short pairs, 3 epochs) validated the training loop and is kept as
+`docs/training_loss_light.png` / `docs/training_loss_dark.png`.
 
 ## Usage
 
@@ -218,13 +228,17 @@ python3 eval.py --model Qwen/Qwen3-0.6B --limit 5     # quick smoke run
 # training
 python3 train.py --limit 60 --epochs 3 --max-seq-len 1024 \
     --grad-accum 4 --tag smoke                        # smoke overfit
-python3 train.py --epochs 2 --max-seq-len 2048 \
+python3 train.py --epochs 3 --max-seq-len 2048 \
     --grad-accum 8 --tag full                         # full run
 
 # training-loss figure for this README
 python3 plot_training.py
 python3 plot_training.py --state checkpoints/lora-full/train_state.json \
     --stem training_loss_full
+python3 plot_training.py --state checkpoints/lora-night-20261022/train_state.json \
+    --title "Second run: loss on assistant tokens" \
+    --subtitle "2,579 pairs | 3 epochs | 969 optimizer steps" \
+    --stem training_loss_night
 
 # line B asm programs
 python3 verifier.py prog.s --tests prog.test.json

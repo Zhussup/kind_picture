@@ -1,0 +1,34 @@
+{
+  "model": "Qwen/Qwen3-0.6B",
+  "adapter": "checkpoints/lora-night-20261022/final",
+  "val": "/tmp/val_old26.jsonl",
+  "n": 26,
+  "compiled": 22,
+  "passed": 6,
+  "ref_errors": 0,
+  "truncated": 0,
+  "output_kinds": {
+    "c": 26
+  },
+  "compile_rate": 0.8462,
+  "pass_rate": 0.2308,
+  "by_opt": {
+    "O0": {
+      "n": 13,
+      "compile_rate": 0.7692,
+      "pass_rate": 0.2308
+    },
+    "O2": {
+      "n": 13,
+      "compile_rate": 0.9231,
+      "pass_rate": 0.2308
+    }
+  },
+  "decoding": {
+    "do_sample": false,
+    "max_new_tokens": 1024
+  },
+  "cases": "default",
+  "elapsed_seconds": 253.9,
+  "ts": "2026-10-22T10:59:31+05:00"
+}
