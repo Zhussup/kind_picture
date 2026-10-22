@@ -1,0 +1,43 @@
+{
+  "model": "Qwen/Qwen3-0.6B",
+  "adapter": "checkpoints/lora-night-20261022/final",
+  "val": "/home/zhus/Desktop/projects/ml/kind_picture/ml/asm/dataset/val118.jsonl",
+  "n_pairs": 118,
+  "n": 63,
+  "compiled": 52,
+  "passed": 21,
+  "ref_errors": 0,
+  "truncated": 3,
+  "uninformative": 0,
+  "n_informative": 63,
+  "output_kinds": {
+    "c": 63
+  },
+  "compile_rate": 0.8254,
+  "pass_rate": 0.3333,
+  "pass_rate_informative": 0.3333,
+  "by_opt": {
+    "O0": {
+      "n": 32,
+      "compile_rate": 0.7812,
+      "pass_rate": 0.3438,
+      "pass_rate_informative": 0.3438
+    },
+    "O2": {
+      "n": 31,
+      "compile_rate": 0.871,
+      "pass_rate": 0.3226,
+      "pass_rate_informative": 0.3226
+    }
+  },
+  "decoding": {
+    "do_sample": false,
+    "max_new_tokens": 1024
+  },
+  "cases": "/home/zhus/Desktop/projects/ml/kind_picture/ml/asm/dataset/cases_val.jsonl",
+  "inputs_key": "cases367d2222",
+  "resumed": 33,
+  "new_this_run": 30,
+  "elapsed_seconds": 309.5,
+  "ts": "2026-10-22T18:44:31+05:00"
+}

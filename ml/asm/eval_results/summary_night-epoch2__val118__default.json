@@ -1,0 +1,43 @@
+{
+  "model": "Qwen/Qwen3-0.6B",
+  "adapter": "checkpoints/lora-night-20261022/epoch-2",
+  "val": "/home/zhus/Desktop/projects/ml/kind_picture/ml/asm/dataset/val118.jsonl",
+  "n_pairs": 118,
+  "n": 118,
+  "compiled": 75,
+  "passed": 25,
+  "ref_errors": 0,
+  "truncated": 14,
+  "uninformative": 0,
+  "n_informative": 118,
+  "output_kinds": {
+    "c": 118
+  },
+  "compile_rate": 0.6356,
+  "pass_rate": 0.2119,
+  "pass_rate_informative": 0.2119,
+  "by_opt": {
+    "O0": {
+      "n": 59,
+      "compile_rate": 0.6271,
+      "pass_rate": 0.2373,
+      "pass_rate_informative": 0.2373
+    },
+    "O2": {
+      "n": 59,
+      "compile_rate": 0.6441,
+      "pass_rate": 0.1864,
+      "pass_rate_informative": 0.1864
+    }
+  },
+  "decoding": {
+    "do_sample": false,
+    "max_new_tokens": 1024
+  },
+  "cases": "default",
+  "inputs_key": "default",
+  "resumed": 0,
+  "new_this_run": 118,
+  "elapsed_seconds": 2159.3,
+  "ts": "2026-10-22T15:23:56+05:00"
+}

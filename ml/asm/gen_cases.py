@@ -18,6 +18,12 @@ that eval.py can replay.
 
 The selection is deterministic: same program, same cases.
 
+Resume
+------
+Programs are appended to the output file one by one, flushed after each line
+and fsynced every 25 programs. A rerun with the same --out skips the programs
+already in the file, so a killed run costs only the program it was working on.
+
 Usage
 -----
   python3 gen_cases.py --split val
@@ -102,6 +108,39 @@ PROBE_POOL = [
 MAX_PROBES = 6          # kept per program
 MAX_OUT_BYTES = 4096    # longer output means the input drove the program wild
 MIN_OUT_CHARS = 1       # non-empty stdout: the only thing a no-op cannot fake
+SYNC_EVERY = 25         # programs between fsync calls on the output file
+
+
+def load_done(path):
+    """Programs already processed, read back from the output file.
+
+    A line cut in half by a kill is dropped and the file is rewritten without
+    it: appending after a broken line would glue two JSON objects together."""
+    done = {}
+    if not os.path.exists(path):
+        return done
+    bad = False
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                bad = True
+                continue
+            done[row["source_id"]] = row
+    if bad:
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            for row in done.values():
+                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+        print(f"dropped a broken last line from {path}", flush=True)
+    return done
 
 
 def load_references(split):
@@ -165,53 +204,69 @@ def main():
     args = ap.parse_args()
 
     refs = load_references(args.split)
+    done = load_done(args.out)
+    todo = [sid for sid in sorted(refs) if sid not in done]
     print(f"programs: {len(refs)}, probe pool: {len(PROBE_POOL)}, "
-          f"keep up to {args.max_probes}", flush=True)
+          f"keep up to {args.max_probes}")
+    print(f"resume: {len(done)} programs already in {args.out}, "
+          f"{len(todo)} to go", flush=True)
 
-    out_rows = []
+    out_f = None
+    if not args.dry_run:
+        os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
+        # Append: a killed run keeps every program it finished. The file is
+        # flushed after each line and fsynced every SYNC_EVERY programs.
+        out_f = open(args.out, "a", encoding="utf-8")
+
     n_done = 0
     n_informative = 0
     probe_hist = {}
-    with tempfile.TemporaryDirectory(prefix="gen_cases_") as workdir:
-        for sid in sorted(refs):
-            ok, exe, err = difftest.compile_c(refs[sid], workdir, "ref")
-            if not ok:
-                print(f"  source {sid}: reference does not compile, skipped",
-                      flush=True)
-                out_rows.append({"source_id": sid, "informative": False,
-                                 "n_probes": 0, "cases": []})
+    try:
+        with tempfile.TemporaryDirectory(prefix="gen_cases_") as workdir:
+            for sid in todo:
+                ok, exe, err = difftest.compile_c(refs[sid], workdir, "ref")
+                if not ok:
+                    print(f"  source {sid}: reference does not compile, skipped",
+                          flush=True)
+                    row = {"source_id": sid, "informative": False,
+                           "n_probes": 0, "cases": []}
+                else:
+                    cases = pick_cases(exe, workdir, args.max_probes)
+                    os.remove(exe)
+                    row = {"source_id": sid, "informative": bool(cases),
+                           "n_probes": len(cases), "cases": cases}
+                informative = row["informative"]
+                n_informative += informative
+                probe_hist[len(row["cases"])] = (
+                    probe_hist.get(len(row["cases"]), 0) + 1)
+                if out_f is not None:
+                    out_f.write(json.dumps(row, ensure_ascii=False) + "\n")
+                    out_f.flush()
+                    if (n_done + 1) % SYNC_EVERY == 0:
+                        os.fsync(out_f.fileno())
                 n_done += 1
-                continue
-            cases = pick_cases(exe, workdir, args.max_probes)
-            os.remove(exe)
-            informative = bool(cases)
-            n_informative += informative
-            probe_hist[len(cases)] = probe_hist.get(len(cases), 0) + 1
-            out_rows.append({"source_id": sid, "informative": informative,
-                             "n_probes": len(cases), "cases": cases})
-            n_done += 1
-            if n_done % 100 == 0:
-                print(f"  {n_done}/{len(refs)} programs", flush=True)
-            if args.dry_run and n_done >= args.dry_run:
-                break
+                if n_done % 100 == 0:
+                    print(f"  {n_done}/{len(todo)} new programs "
+                          f"({len(done) + n_done}/{len(refs)} total)",
+                          flush=True)
+                if args.dry_run and n_done >= args.dry_run:
+                    break
+    finally:
+        if out_f is not None:
+            out_f.flush()
+            os.fsync(out_f.fileno())
+            out_f.close()
 
-    print(f"\nprocessed {n_done}, informative {n_informative} "
+    total = len(done) + n_done
+    print(f"\nthis run: processed {n_done}, informative {n_informative} "
           f"({n_informative / max(1, n_done) * 100:.1f}%)")
-    print("probes per program:", dict(sorted(probe_hist.items())))
+    print("probes per program (this run):", dict(sorted(probe_hist.items())))
+    print(f"total in {args.out}: {total}/{len(refs)} programs")
 
     if args.dry_run:
         print("dry run: nothing written")
         return
-
-    os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
-    tmp = args.out + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        for row in out_rows:
-            f.write(json.dumps(row, ensure_ascii=False) + "\n")
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, args.out)
-    print(f"wrote {args.out} ({len(out_rows)} programs)")
+    print(f"wrote {args.out}")
 
 
 if __name__ == "__main__":

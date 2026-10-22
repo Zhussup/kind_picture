@@ -21,3 +21,86 @@ programs: 4740, probe pool: 46, keep up to 6
   2000/4740 programs
   2100/4740 programs
   2200/4740 programs
+  source 2423: reference does not compile, skipped
+  source 2427: reference does not compile, skipped
+  2300/4740 programs
+  2400/4740 programs
+  2500/4740 programs
+  2600/4740 programs
+  2700/4740 programs
+  2800/4740 programs
+  2900/4740 programs
+  3000/4740 programs
+  source 3251: reference does not compile, skipped
+  3100/4740 programs
+  3200/4740 programs
+  3300/4740 programs
+  3400/4740 programs
+  source 3641: reference does not compile, skipped
+  source 3645: reference does not compile, skipped
+  3500/4740 programs
+  3600/4740 programs
+  3700/4740 programs
+programs: 4740, probe pool: 46, keep up to 6
+resume: 0 programs already in dataset/cases.jsonl, 4740 to go
+  100/4740 new programs (100/4740 total)
+  200/4740 new programs (200/4740 total)
+  300/4740 new programs (300/4740 total)
+  400/4740 new programs (400/4740 total)
+  500/4740 new programs (500/4740 total)
+  600/4740 new programs (600/4740 total)
+  700/4740 new programs (700/4740 total)
+  800/4740 new programs (800/4740 total)
+  900/4740 new programs (900/4740 total)
+  1000/4740 new programs (1000/4740 total)
+  1100/4740 new programs (1100/4740 total)
+  1200/4740 new programs (1200/4740 total)
+  1300/4740 new programs (1300/4740 total)
+  1400/4740 new programs (1400/4740 total)
+  1500/4740 new programs (1500/4740 total)
+  1600/4740 new programs (1600/4740 total)
+  1700/4740 new programs (1700/4740 total)
+  1800/4740 new programs (1800/4740 total)
+  1900/4740 new programs (1900/4740 total)
+  2000/4740 new programs (2000/4740 total)
+  2100/4740 new programs (2100/4740 total)
+  2200/4740 new programs (2200/4740 total)
+  source 2423: reference does not compile, skipped
+  source 2427: reference does not compile, skipped
+  2300/4740 new programs (2300/4740 total)
+  2400/4740 new programs (2400/4740 total)
+  2500/4740 new programs (2500/4740 total)
+  2600/4740 new programs (2600/4740 total)
+  2700/4740 new programs (2700/4740 total)
+  2800/4740 new programs (2800/4740 total)
+  2900/4740 new programs (2900/4740 total)
+  3000/4740 new programs (3000/4740 total)
+  source 3251: reference does not compile, skipped
+  3100/4740 new programs (3100/4740 total)
+  3200/4740 new programs (3200/4740 total)
+  3300/4740 new programs (3300/4740 total)
+  3400/4740 new programs (3400/4740 total)
+  source 3641: reference does not compile, skipped
+  source 3645: reference does not compile, skipped
+  3500/4740 new programs (3500/4740 total)
+  3600/4740 new programs (3600/4740 total)
+  3700/4740 new programs (3700/4740 total)
+  3800/4740 new programs (3800/4740 total)
+  source 4043: reference does not compile, skipped
+  source 4047: reference does not compile, skipped
+  3900/4740 new programs (3900/4740 total)
+  4000/4740 new programs (4000/4740 total)
+  4100/4740 new programs (4100/4740 total)
+  4200/4740 new programs (4200/4740 total)
+  source 4500: reference does not compile, skipped
+  4300/4740 new programs (4300/4740 total)
+  4400/4740 new programs (4400/4740 total)
+  4500/4740 new programs (4500/4740 total)
+  source 4855: reference does not compile, skipped
+  4600/4740 new programs (4600/4740 total)
+  4700/4740 new programs (4700/4740 total)
+
+this run: processed 4740, informative 4459 (94.1%)
+probes per program (this run): {0: 281, 1: 244, 2: 445, 3: 248, 4: 257, 5: 136, 6: 3129}
+total in dataset/cases.jsonl: 4740/4740 programs
+wrote dataset/cases.jsonl
