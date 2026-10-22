@@ -3,31 +3,31 @@
   "adapter": "checkpoints/lora-night-20261022/final",
   "val": "/home/zhus/Desktop/projects/ml/kind_picture/ml/asm/dataset/val118.jsonl",
   "n_pairs": 118,
-  "n": 63,
-  "compiled": 52,
-  "passed": 21,
+  "n": 118,
+  "compiled": 83,
+  "passed": 32,
   "ref_errors": 0,
-  "truncated": 3,
-  "uninformative": 0,
-  "n_informative": 63,
+  "truncated": 8,
+  "uninformative": 2,
+  "n_informative": 116,
   "output_kinds": {
-    "c": 63
+    "c": 118
   },
-  "compile_rate": 0.8254,
-  "pass_rate": 0.3333,
-  "pass_rate_informative": 0.3333,
+  "compile_rate": 0.7034,
+  "pass_rate": 0.2712,
+  "pass_rate_informative": 0.2759,
   "by_opt": {
     "O0": {
-      "n": 32,
-      "compile_rate": 0.7812,
-      "pass_rate": 0.3438,
-      "pass_rate_informative": 0.3438
+      "n": 59,
+      "compile_rate": 0.6441,
+      "pass_rate": 0.2712,
+      "pass_rate_informative": 0.2759
     },
     "O2": {
-      "n": 31,
-      "compile_rate": 0.871,
-      "pass_rate": 0.3226,
-      "pass_rate_informative": 0.3226
+      "n": 59,
+      "compile_rate": 0.7627,
+      "pass_rate": 0.2712,
+      "pass_rate_informative": 0.2759
     }
   },
   "decoding": {
@@ -37,7 +37,7 @@
   "cases": "/home/zhus/Desktop/projects/ml/kind_picture/ml/asm/dataset/cases_val.jsonl",
   "inputs_key": "cases367d2222",
   "resumed": 33,
-  "new_this_run": 30,
-  "elapsed_seconds": 309.5,
-  "ts": "2026-10-22T18:44:31+05:00"
+  "new_this_run": 85,
+  "elapsed_seconds": 963.5,
+  "ts": "2026-10-22T18:55:25+05:00"
 }

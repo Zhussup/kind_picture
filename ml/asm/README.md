@@ -33,21 +33,29 @@ model answer (C) ──► difftest.py: original C vs predicted C ──► verd
 
 - `gen_c.py` — collector for line A1: asks the model (`beam:cloud`) for a C
   program, compiles it with gcc at `-O0` and `-O2`, stores both listings.
+- `collector.sh` — supervisor for `gen_c.py`: restarts it whenever it exits, for
+  any reason (uncaught exception, killed process, Ollama gone after a shutdown),
+  with a `flock` guard so a second copy cannot start.
 - `build_dataset.py` — turns raw shards into chat-format JSONL pairs
   (listing → original C), with leak stripping, deduplication and a
   train/val split.
+- `gen_cases.py` — builds per-program differential probes: tries a pool of 46
+  stdin inputs against each reference program, keeps up to six that it actually
+  reacts to, writes them to `dataset/cases.jsonl`.
 - `difftest.py` — differential tester: compiles the reference C and a
   predicted C, runs both on the same stdin inputs, compares stdout and exit
   codes.
 - `eval.py` — evaluates a local model (base or LoRA-tuned) on `val.jsonl`:
   greedy generation, C extraction, `difftest` check, `compile_rate` and
-  `pass_rate`; writes predictions and a summary JSON.
+  `pass_rate`; appends predictions and resumes an interrupted run.
 - `train.py` — LoRA SFT of Qwen3-0.6B on `train.jsonl`. The loss is computed
   only on the assistant's C answer: prompt and listing tokens are masked with
   `-100`, so the model learns reconstruction instead of copying the prompt.
   Pairs longer than `--max-seq-len` are skipped, not truncated.
 - `plot_training.py` — renders the training-loss figure in `docs/` (light and
   dark PNG) from `train_state.json` or directly from a training log.
+- `plot_eval.py` — renders the evaluation figures (`eval_full118`,
+  `eval_epochs`, `eval_probes`) from `eval_results/`.
 - `verifier.py` — runner/checker for line B asm programs: x86-64, AT&T syntax,
   entry point `_start`, no libc, I/O only through `read(0)` / `write(1)`
   syscalls. Exit codes: `0` all tests pass, `1` assembled but tests failed,
@@ -55,7 +63,9 @@ model answer (C) ──► difftest.py: original C vs predicted C ──► verd
 - `tests/` — self-tests for the verifier (`hello.s`, `echo.s`, `crash.s`,
   `infinite.s`).
 - `raw_c/` — output shards of `gen_c.py` (runtime data).
-- `dataset/` — built `train.jsonl`, `val.jsonl`, `stats.json` (runtime data).
+- `dataset/` — built `train.jsonl`, `val.jsonl`, `stats.json`, the per-program
+  probes `cases.jsonl` / `cases_val.jsonl`, and the frozen validation snapshot
+  `val118.jsonl` that every number in this README was measured on (runtime data).
 - `checkpoints/` — LoRA adapters and `train_state.json` (runtime data).
 - `eval_results/` — `predictions_*.jsonl` and `summary_*.json` per evaluation
   run: one row per validation pair, every answer with its compile and
@@ -164,6 +174,54 @@ outputs are always taken from the reference, never from the file.
 CLI exit codes: `0` all inputs matched, `1` behavior mismatch,
 `2` candidate failed to compile, `3` bad input.
 
+## Per-program probes (`gen_cases.py`)
+
+One fixed probe list for every program measures the wrong thing. Ten global
+inputs cannot tell a correct answer from `int main(void){ return 0; }` when the
+program prints nothing on those inputs, and they never feed a matrix program the
+shape it expects.
+
+`gen_cases.py` fixes this at the source. For each reference program it runs a
+pool of 46 stdin shapes (single integers, pairs, `n` followed by an array,
+matrices, text lines, blank lines), and keeps the inputs the reference actually
+reacts to: clean exit, non-empty stdout, no timeout, and a stdout different from
+every input kept before it. Up to six are kept, longest output first.
+
+```
+{"source_id": 46, "informative": true, "n_probes": 4,
+ "cases": [{"name": "n + array", "stdin": "5\n3 1 4 1 5\n"}, ...]}
+```
+
+Selection is deterministic: same program, same probes. 4,459 of 4,740 collected
+programs got at least one probe; the remaining 281 read nothing or print
+nothing and are recorded with `"informative": false`, so `eval.py` can exclude
+them instead of scoring them as passes.
+
+The selection is not free of bias: a program keeps one to six probes, and a
+program with one probe is easier to pass. Reporting the rate only over pairs with
+two or more probes is the conservative comparison.
+
+## Evaluation (`eval.py`)
+
+Generation is greedy (`do_sample=False`), so the answer to a given prompt is
+deterministic and two runs differ only in the model.
+
+Results are appended to `eval_results/predictions_<tag>__<val>__<probes>.jsonl`,
+one line per pair, flushed and fsynced. The name contains no timestamp and a
+hash of the probe set, which gives three properties:
+
+- a rerun with the same arguments reads the file, skips the pairs already in it
+  and continues the rest — a shutdown costs one pair, not the run;
+- a changed `--cases`/`--cases-by-source` lands in a different file instead of
+  mixing two measurements;
+- a line cut in half by a kill is dropped when the file is read, and the file is
+  rewritten without it before appending.
+
+The summary is rebuilt from the file every ten pairs, so even an interrupted run
+has correct numbers for the pairs it finished. `compile_rate` and `pass_rate`
+cover every record in the file; `pass_rate_informative` excludes pairs whose
+program has no probe at all.
+
 ## Training
 
 `train.py` fine-tunes Qwen3-0.6B with a LoRA adapter on `dataset/train.jsonl`.
@@ -195,9 +253,27 @@ boundary must restart.
 On the 26-pair validation set the second adapter answers with C code in all 26
 cases, compiles 22 (84.6%, up from 19 for the first adapter) and matches the
 reference behavior on 6 (23.1%, up from 0%). On the full 118-pair split it
-compiles 83 (70.3%) and matches behavior on 27 (22.9%). An earlier smoke run
-(60 short pairs, 3 epochs) validated the training loop and is kept as
+compiles 83 (70.3%) and matches behavior on 27 (22.9%) with the fixed ten
+probes, or on 32 (27.1%) with per-program probes — 23 of 96 (24.0%) when only
+pairs with two or more probes are counted. An earlier smoke run (60 short
+pairs, 3 epochs) validated the training loop and is kept as
 `docs/training_loss_light.png` / `docs/training_loss_dark.png`.
+
+Per epoch on the same 118 pairs, behavior match goes 16.1% → 21.2% → 22.9%
+while compile rate wanders 72.9% → 63.6% → 70.3%: the second epoch earns most of
+the gain, and compile rate is not a proxy for quality.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/eval_epochs_dark.png">
+  <img src="docs/eval_epochs_light.png"
+       alt="Behavior match after 1, 2 and 3 epochs: 16.1, 21.2 and 22.9 percent, while compile rate goes 72.9, 63.6 and 70.3 percent"
+       width="840">
+</picture>
+
+The last `build_dataset.py` run produced **9,256 train / 184 validation** pairs
+from 5,005 collected programs; the adapter above was trained on the earlier
+2,579-pair subset of a 5,349-pair split, so the rebuild is not reflected in any
+number here yet.
 
 ## Usage
 
@@ -220,10 +296,18 @@ python3 difftest.py ref.c cand.c                       # default inputs
 python3 difftest.py ref.c cand.c --cases cases.json    # custom inputs
 python3 difftest.py ref.c cand.c --json                # machine-readable
 
+# per-program probes (resumable; --split val for the validation programs only)
+python3 gen_cases.py --split all --out dataset/cases.jsonl
+python3 gen_cases.py --split val --dry-run 5           # preview, write nothing
+
 # model evaluation on val
 python3 eval.py --model Qwen/Qwen3-0.6B                # baseline
 python3 eval.py --model Qwen/Qwen3-0.6B --adapter checkpoints/lora --tag lora
 python3 eval.py --model Qwen/Qwen3-0.6B --limit 5     # quick smoke run
+python3 eval.py --model Qwen/Qwen3-0.6B \
+    --adapter checkpoints/lora-night-20261022/final \
+    --val dataset/val118.jsonl --cases-by-source dataset/cases_val.jsonl \
+    --tag night-final-cases                           # same command resumes
 
 # training
 python3 train.py --limit 60 --epochs 3 --max-seq-len 1024 \
@@ -231,14 +315,13 @@ python3 train.py --limit 60 --epochs 3 --max-seq-len 1024 \
 python3 train.py --epochs 3 --max-seq-len 2048 \
     --grad-accum 8 --tag full                         # full run
 
-# training-loss figure for this README
-python3 plot_training.py
-python3 plot_training.py --state checkpoints/lora-full/train_state.json \
-    --stem training_loss_full
+# figures
+python3 plot_training.py                               # training loss
 python3 plot_training.py --state checkpoints/lora-night-20261022/train_state.json \
     --title "Second run: loss on assistant tokens" \
     --subtitle "2,579 pairs | 3 epochs | 969 optimizer steps" \
     --stem training_loss_night
+python3 plot_eval.py                                   # evaluation figures
 
 # line B asm programs
 python3 verifier.py prog.s --tests prog.test.json
@@ -246,11 +329,25 @@ python3 verifier.py prog.s --tests prog.test.json
 
 ## Background collection
 
-The collector is started through a restart wrapper (`while true` loop) and
-writes to `gen_c.out` and `gen_c.log`; the wrapper pid is stored in
-`gen_c.pid`. Stop it wrapper first, otherwise it restarts the collector:
+The collector runs under `collector.sh`, a supervisor that restarts `gen_c.py`
+whenever it exits — an uncaught exception, a killed process, or Ollama going
+away when the laptop shuts down. A `flock` guard makes a second copy a no-op.
+
+```bash
+nohup setsid ./collector.sh >/dev/null 2>&1 &   # detached, survives the shell
+tail -f gen_c.log                               # progress
+```
+
+Stop it wrapper first, otherwise it restarts the collector:
 
 ```bash
 kill "$(cat gen_c.pid)"   # stop the wrapper loop
 pkill -f "gen_c.py"       # stop the collector itself
 ```
+
+The checkpoint `state_gen_c.json` is written atomically every minute and after
+every sample, so a restart resumes at the last finished sample. The supervisor
+does not survive a reboot on its own: start it again, or put it in a systemd
+user unit. The collector needs a running Ollama with a logged-in account and
+the `beam:cloud` model — without it, every request fails and the process backs
+off instead of dying.

@@ -21,11 +21,13 @@
 
 > **Status (2026-10-22):** the pipeline works end-to-end and the second full
 > LoRA run is evaluated. On a 118-pair validation split the adapter compiles
-> **70.3%** of the answers and reproduces the reference behavior on **22.9%**;
-> on the 26-pair subset shared with the earlier runs it reaches **84.6%** and
-> **23.1%**, against 73.1% / 0% for the previous adapter and 26.9% / 0% for the
-> base model. Behavior match is no longer zero — the remaining gap is edge-case
-> handling, not syntax. Numbers are reported as they are.
+> **70.3%** of the answers; **27.1%** of them reproduce the reference behavior
+> when each program is tested on its own probes, **22.9%** when every program
+> is tested on one fixed list of ten inputs. On the 26-pair subset shared with
+> the earlier runs it reaches **84.6%** and **23.1%**, against 73.1% / 0% for
+> the previous adapter and 26.9% / 0% for the base model. A do-nothing program
+> scores 5.1% on the fixed list and 0% on per-program probes, so the metric no
+> longer pays for empty answers. Numbers are reported as they are.
 
 ## The idea
 
@@ -61,6 +63,8 @@ flowchart LR
   D --> S["LoRA SFT, Qwen3-0.6B"]
   S --> M["reconstructed C"]
   R["reference C"] --> DT["difftest.py"]
+  R --> C["gen_cases.py<br/>probes per program"]
+  C --> DT
   M --> DT
   DT --> V["compile_rate / pass_rate"]
 ```
@@ -82,8 +86,11 @@ code uses libc and PLT calls, freestanding code talks to the kernel directly.
 | Base Qwen3-0.6B | 26 pairs | 26.9% | 0% | the starting point: often copies the listing into a `c` block |
 | Smoke LoRA, 60 pairs x 3 epochs | 16 pairs* | 37.5% | 0% | format learned: **16/16** answers are C; expected to overfit |
 | Full LoRA, 723 pairs x 2 epochs | 26 pairs | **73.1%** | 0% | structure learned: all 26 answers are C; behavior is the remaining gap |
+| Full LoRA, epoch 1 | 118 pairs | 72.9% | 16.1% | same probes as the next two rows: behavior appears before the run ends |
+| Full LoRA, epoch 2 | 118 pairs | 63.6% | 21.2% | more epochs, more correct behavior — compile rate does not follow |
 | Full LoRA, 2,579 pairs x 3 epochs | 26 pairs | **84.6%** | **23.1%** | same 26 pairs as the rows above: compiles more, and behavior finally matches |
-| Full LoRA, 2,579 pairs x 3 epochs | 118 pairs | 70.3% | **22.9%** | the full split; see the figure below |
+| Full LoRA, epoch 3, 10 fixed probes | 118 pairs | 70.3% | **22.9%** | one probe list for every program: the pessimistic number |
+| Full LoRA, epoch 3, per-program probes | 118 pairs | 70.3% | **27.1%** | each program tested on inputs its reference actually reacts to |
 
 \* The smoke run used the earlier 16-pair split, so it is not directly
 comparable with the 26-pair baseline. Its purpose was to validate the training
@@ -92,26 +99,60 @@ loop, not to claim accuracy.
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="ml/asm/docs/eval_full118_dark.png">
   <img src="ml/asm/docs/eval_full118_light.png"
-       alt="Full 118-pair validation split. Compile rate 70.3% overall, 64.4% at -O0 and 76.3% at -O2. Same behavior on all probes 22.9% overall, 23.7% at -O0 and 22.0% at -O2. Of the 118 answers, 27 passed, 56 compiled but differed, 27 did not compile and 8 had no c block."
+       alt="Full 118-pair validation split with per-program probes. Compile rate 70.3% overall, 64.4% at -O0 and 76.3% at -O2. Same behavior 27.1% overall, 27.1% at -O0 and 27.1% at -O2. Of the 118 answers, 32 passed, 51 compiled but differed, 27 did not compile and 8 had no c block."
+       width="840">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="ml/asm/docs/eval_epochs_dark.png">
+  <img src="ml/asm/docs/eval_epochs_light.png"
+       alt="Behavior match after 1, 2 and 3 epochs: 16.1, 21.2 and 22.9 percent, while compile rate goes 72.9, 63.6 and 70.3 percent"
+       width="840">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="ml/asm/docs/eval_probes_dark.png">
+  <img src="ml/asm/docs/eval_probes_light.png"
+       alt="Same adapter, same 118 answers: 22.9 percent with one fixed probe list, 27.1 percent with per-program probes, 24.0 percent when only pairs with two or more probes are counted"
        width="840">
 </picture>
 
 The second full run used every pair that fit the 2,048-token window: 2,579
 pairs, 3 epochs, final loss 0.015. The 26-pair row is the subset that the
 earlier runs were evaluated on, so it is the only apples-to-apples comparison;
-the 118-pair row is the honest number on the whole split and is lower because
-that subset happens to be easier than average.
+the 118-pair rows are the honest numbers on the whole split and are lower
+because that subset happens to be easier than average.
 
-On the full split the adapter compiles **70.3%** of the answers and matches the
-reference behavior on **22.9%**. The `-O2` side compiles markedly more often
-than `-O0` (76.3% vs 64.4%), but behavior match is flat across the two (22.0%
-vs 23.7%): optimizer output is not harder to read, it just fails differently.
+**Three epochs, one direction.** Pass rate climbs 16.1% → 21.2% → 22.9% while
+compile rate wanders 72.9% → 63.6% → 70.3%. Most of the gain is earned in the
+second epoch; the third mostly stops the model from breaking what already
+worked. Compile rate is therefore not a proxy for quality: an answer can get
+longer and more ambitious, stop compiling, and still be closer to correct.
 
-Of the 118 answers, 27 match the reference on every probe, 56 compile but
-disagree with it, 27 do not compile, and 8 contain no `` ```c `` fence at all.
-Sixteen of the 56 mismatches already agree on 9 of the 10 probes, so most of the
-remaining gap is edge-case handling (empty input, negative numbers) rather than
-the algorithm itself.
+**Which probes are used matters.** `difftest.py` used to run the same ten
+inputs for every program. Those inputs cannot distinguish a correct answer
+from an empty one when the program ignores stdin, and they miss programs that
+need a specific shape. `gen_cases.py` now tries a pool of 46 inputs against
+each reference program, keeps up to six that it actually reacts to, and stores
+them per program: 4,459 of 4,740 programs got a real probe list, 281 got none
+and are excluded from the score. On the 118-pair split this raises behavior
+match from 22.9% to 27.1%, and nine pairs that failed the fixed list pass their
+own probes; the two pairs that a do-nothing program used to pass now fail.
+
+The honest comparison is narrower: probe counts differ per program (78 pairs
+get six, 20 get one), and one probe is easier to pass than ten. Restricting to
+pairs with at least two probes gives **24.0%**, against **21.6%** for the same
+restriction under fixed probes. So the old number was not inflated — it was
+slightly pessimistic.
+
+On the full split the adapter compiles **70.3%** of the answers. The `-O2` side
+compiles markedly more often than `-O0` (76.3% vs 64.4%), but behavior match is
+flat across the two: optimizer output is not harder to read, it just fails
+differently.
+
+Of the 118 answers, 32 match the reference on every probe of their program, 51
+compile but disagree with it, 27 do not compile, and 8 contain no
+`` ```c `` fence at all.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="ml/asm/docs/training_loss_full_dark.png">
@@ -131,19 +172,25 @@ averages: 0.229, 0.103, 0.057).
 
 | Metric | Value |
 |--------|-------|
-| Programs collected | **4,901** (collector stopped 2026-10-22) |
-| Programs in the last dataset build | 2,906 |
-| Listings (`-O0` + `-O2`) in that build | **5,467** |
-| Train / validation pairs | **5,349 / 118**, split by hashed source id |
+| Programs collected | **5,796** and counting (collector running since 2026-10-21) |
+| Programs in the last dataset build | 5,005 |
+| Listings (`-O0` + `-O2`) in that build | **9,440** (`-O0` 4,737, `-O2` 4,703) |
+| Train / validation pairs | **9,256 / 184**, split by hashed source id |
 | Prompt space | 406 tasks x 32 wording variations = **12,992** |
-| Duplicates removed / compile failures excluded | 237 / 108 |
-| Pairs dropped from the last training run as too long | 2,770 of 5,349 (> 2,048 tokens) |
-| A rebuild over all collected programs would give | 9,066 / 182 pairs (not yet trained on) |
+| Duplicates removed / compile failures excluded | 344 / 226 |
+| Programs with a real probe list (`gen_cases.py`) | **4,459 of 4,740** (94.1%) |
+| Pairs in the last training run | 2,579 — the other 2,770 exceeded 2,048 tokens |
+| Validation snapshot behind every number here | the older **118-pair** split, kept as `ml/asm/dataset/val118.jsonl` |
 
 Every pair carries two views of the same program: `-O0` preserves the source
 structure, `-O2` shows what the optimizer does to it. The split is by source
 record, so both optimization levels of one program always land on the same
 side.
+
+The evaluation numbers in this README come from the 118-pair split that existed
+before the last rebuild, kept as a snapshot so old and new runs stay
+comparable. The current build has 184 validation pairs; nothing has been
+trained on them yet.
 
 ## Quick start
 
@@ -165,30 +212,41 @@ Build the dataset from the collected shards, train, and evaluate:
 # 1. rebuild train/val from ml/asm/raw_c/ (safe while the collector runs)
 python3 ml/asm/build_dataset.py
 
-# 2. smoke test the training loop on 60 short pairs
+# 2. pick the differential probes each reference program reacts to
+#    (resumable: a rerun continues where the previous one stopped)
+python3 ml/asm/gen_cases.py --split all --out ml/asm/dataset/cases.jsonl
+
+# 3. smoke test the training loop on 60 short pairs
 python3 ml/asm/train.py --limit 60 --epochs 3 --max-seq-len 1024 \
     --grad-accum 4 --tag smoke
 
-# 3. full run (the numbers in Results, ~2h15m on an RTX 3050)
+# 4. full run (the numbers in Results, ~2h15m on an RTX 3050)
 python3 ml/asm/train.py --epochs 3 --max-seq-len 2048 \
     --grad-accum 8 --tag night-20261022
 
-# 4. evaluate on the validation split (`--val` can point at any JSONL of pairs,
-#    which is how the same 26-pair subset is compared across runs)
+# 5. evaluate on the validation split (`--val` can point at any JSONL of pairs,
+#    which is how the same 26-pair subset is compared across runs; results are
+#    appended, so an interrupted run continues instead of starting over)
 python3 ml/asm/eval.py --model Qwen/Qwen3-0.6B --tag base
 python3 ml/asm/eval.py --model Qwen/Qwen3-0.6B \
     --adapter ml/asm/checkpoints/lora-night-20261022/final --tag night-final
 python3 ml/asm/eval.py --model Qwen/Qwen3-0.6B \
     --adapter ml/asm/checkpoints/lora-night-20261022/final \
-    --val /tmp/subset.jsonl --tag night-final-subset
+    --val ml/asm/dataset/val118.jsonl \
+    --cases-by-source ml/asm/dataset/cases_val.jsonl --tag night-final-cases
 
-# 5. regenerate a training-loss figure (light + dark PNG, matplotlib)
+# 6. regenerate the figures in this README (light + dark PNG, matplotlib)
+python3 ml/asm/plot_eval.py
 python3 ml/asm/plot_training.py \
     --state ml/asm/checkpoints/lora-night-20261022/train_state.json \
     --title "Second run: loss on assistant tokens" \
     --subtitle "2,579 pairs | 3 epochs | 969 optimizer steps" \
     --stem training_loss_night
 ```
+
+The scripts above assume the project virtualenv is active. After a reboot the
+system `python3` has no PyTorch, so either `source .venv/bin/activate` first or
+call `.venv/bin/python` explicitly.
 
 Collect more programs (needs a logged-in Ollama Cloud account and the
 `beam:cloud` model):
@@ -198,6 +256,7 @@ cd ml/asm
 python3 gen_c.py --once      # one sample
 python3 gen_c.py             # endless, crash-safe collection
 python3 gen_c.py --status    # checkpoint and error statistics
+./collector.sh               # keep it alive across crashes and reboots
 ```
 
 ## Repository layout
@@ -206,11 +265,14 @@ python3 gen_c.py --status    # checkpoint and error statistics
 kind_picture/
 ├── ml/asm/                 asm → C pipeline (the main project)
 │   ├── gen_c.py            collector: task → C → gcc -O0/-O2 listings
+│   ├── collector.sh        supervisor: restarts the collector if it dies
 │   ├── build_dataset.py    leak stripping, dedupe, train/val split
+│   ├── gen_cases.py        per-program differential probes
 │   ├── difftest.py         behavioral equivalence checker
-│   ├── eval.py             compile_rate / pass_rate on validation pairs
+│   ├── eval.py             compile_rate / pass_rate, appends and resumes
 │   ├── train.py            LoRA SFT with masked loss
 │   ├── plot_training.py    light/dark training-loss figures
+│   ├── plot_eval.py        light/dark evaluation figures
 │   ├── verifier.py         freestanding asm runner (line B)
 │   ├── raw_c/              collected shards, JSONL per 500 programs (not in git)
 │   ├── dataset/            generated train.jsonl / val.jsonl (not in git)
@@ -232,9 +294,12 @@ kind_picture/
 - [x] LoRA training with assistant-only loss and memory-aware logits
 - [x] First full training run: 73.1% compile rate on unseen pairs
 - [x] Full run with a non-zero `pass_rate` on unseen pairs: 22.9% of 118
-- [ ] Per-task differential inputs, so `pass_rate` is not measured on one
-      fixed set of 10 probes for every program
+- [x] Per-task differential inputs, so `pass_rate` is not measured on one fixed
+      set of 10 probes for every program: 27.1% of 118
+- [x] Resumable evaluation and probe generation — a shutdown costs one pair,
+      not the run
 - [ ] Line B: freestanding `_start` programs verified by `verifier.py`
+- [ ] Train on the rebuilt 9,256-pair split (the current adapter saw 2,579)
 - [ ] A larger model on a two-GPU server
 - [ ] Inference CLI: listing in, verifiable C out
 
@@ -245,15 +310,20 @@ This is an early research prototype, and the README says so on purpose:
 - The task is narrow: small hosted C programs generated from 406 templates,
   compiled by gcc. It is not a general-purpose decompiler.
 - The current model is 0.6B parameters. The second full run puts 70.3% of
-  unseen answers through the compiler and 22.9% through the differential test;
+  unseen answers through the compiler and 27.1% through the differential test;
   the rest either fail to compile or disagree with the reference on at least
   one probe.
-- `pass_rate` is measured on one fixed set of 10 stdin probes for every pair,
-  not on inputs chosen for the task. It underestimates tasks that need specific
-  input and overestimates tasks whose logic those probes never reach.
+- Probe counts are not equal across pairs: 78 of the 118 get six probes, 20 get
+  a single one, and a single probe is easier to pass. On pairs with two or more
+  probes the result is 24.0%, and that is the number to quote for a comparison.
+- 281 of 4,740 collected programs react to no input in the probe pool at all —
+  they read nothing or print nothing. They are excluded from the score, which
+  is right for measurement and wrong for the dataset: the model still trains on
+  them.
 - Training skips pairs longer than `--max-seq-len` (2,048 tokens in the current
-  run) rather than truncating them: 2,770 of 5,349 pairs never reached the last
-  run. Long programs are underrepresented.
+  run) rather than truncating them: 2,770 of the 5,349 pairs in that split never
+  reached the last run. Long programs are underrepresented, and the adapter has
+  not seen the 9,256-pair rebuild.
 - The corpus comes from a single cloud model, so its style and mistakes are
   baked into the data.
 - Line B (freestanding assembly) is designed but not collected yet.
