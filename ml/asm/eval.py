@@ -10,8 +10,11 @@ What it does:
   3. extracts the ```c block from the answer (the same extractor as in gen_c.py);
   4. compiles the extracted C and runs difftest against the reference C;
   5. computes metrics:
-       compile_rate — fraction of answers that compiled at all;
-       pass_rate    — fraction of pairs whose behavior matched on all inputs.
+       compile_rate           — fraction of answers that compiled at all;
+       pass_rate              — fraction of pairs whose behavior matched on all inputs;
+       pass_rate_informative  — the same, over the pairs whose probes can tell a
+                                correct program from a do-nothing one (only with
+                                --cases-by-source).
 
 The reference C is taken from the assistant message of the val pair, and the observable
 behavior comes from running that C. The model's answer is compared to it by BEHAVIOR, not
@@ -148,6 +151,10 @@ def main():
     ap.add_argument("--adapter", help="path to a LoRA adapter (for a fine-tuned model)")
     ap.add_argument("--val", default=VAL_PATH, help="val.jsonl")
     ap.add_argument("--cases", help="JSON with inputs for difftest")
+    ap.add_argument("--cases-by-source",
+                    help="JSONL from gen_cases.py: per-program probes keyed by "
+                         "source_id; pairs without probes are counted as "
+                         "uninformative and excluded from pass_rate")
     ap.add_argument("--limit", type=int, default=0, help="take the first N pairs")
     ap.add_argument("--max-new-tokens", type=int, default=1024)
     ap.add_argument("--out-dir", default=OUT_DIR)
@@ -168,13 +175,31 @@ def main():
             print(f"error in cases: {e}", file=sys.stderr)
             sys.exit(3)
 
+    by_source = None
+    if args.cases_by_source:
+        by_source = {}
+        try:
+            with open(args.cases_by_source, "r", encoding="utf-8") as f:
+                for line in f:
+                    row = json.loads(line)
+                    by_source[row["source_id"]] = row.get("cases") or []
+        except (OSError, json.JSONDecodeError, KeyError) as e:
+            print(f"error in cases-by-source: {e}", file=sys.stderr)
+            sys.exit(3)
+
     rows = load_rows(args.val, args.limit)
     if not rows:
         print("val is empty", file=sys.stderr)
         sys.exit(3)
 
     print(f"model: {args.model}" + (f" + {args.adapter}" if args.adapter else ""))
-    print(f"val: {len(rows)} pairs, difftest inputs: {len(inputs)}")
+    print(f"val: {len(rows)} pairs, difftest inputs: "
+          f"{'per program' if by_source is not None else len(inputs)}")
+
+    if by_source is not None:
+        n_with = sum(1 for r in rows if by_source.get(r.get("source_id")))
+        print(f"cases-by-source: {len(by_source)} programs, "
+              f"{n_with}/{len(rows)} pairs have probes")
     model, tokenizer = load_model(args.model, args.adapter)
 
     os.makedirs(args.out_dir, exist_ok=True)
@@ -185,7 +210,7 @@ def main():
 
     started = time.time()
     stats = {"n": 0, "compiled": 0, "passed": 0, "ref_errors": 0,
-             "truncated": 0, "kinds": {}, "by_opt": {}}
+             "truncated": 0, "uninformative": 0, "kinds": {}, "by_opt": {}}
     with open(pred_path, "w", encoding="utf-8") as pred_f:
         for i, sample in enumerate(rows, 1):
             ref_c = reference_c(sample)
@@ -198,13 +223,22 @@ def main():
             kind = output_kind(answer)
             stats["kinds"][kind] = stats["kinds"].get(kind, 0) + 1
 
+            # With per-program probes, a pair whose reference reacts to no
+            # input at all measures nothing: exclude it from pass_rate.
+            if by_source is not None:
+                sample_inputs = by_source.get(sample.get("source_id")) or []
+            else:
+                sample_inputs = inputs
+            informative = bool(sample_inputs)
+
             if cand_c is None:
                 verdict = {"ref_compiled": True, "cand_compiled": False,
-                           "stage": "cand_compile", "n_total": len(inputs),
+                           "stage": "cand_compile",
+                           "n_total": len(sample_inputs),
                            "n_passed": 0, "all_match": False,
                            "error": "the response has no ```c block", "cases": []}
             else:
-                verdict = difftest.compare(ref_c, cand_c, inputs)
+                verdict = difftest.compare(ref_c, cand_c, sample_inputs)
 
             if not verdict["ref_compiled"]:
                 stats["ref_errors"] += 1
@@ -213,6 +247,7 @@ def main():
             stats["n"] += 1
             stats["compiled"] += compiled
             stats["passed"] += passed
+            stats["uninformative"] += int(not informative)
             stats["truncated"] += int(hit_max)
             opt = sample.get("opt", "?")
             bo = stats["by_opt"].setdefault(opt, {"n": 0, "compiled": 0,
@@ -230,6 +265,7 @@ def main():
                 "output_kind": kind,
                 "candidate_c": cand_c,
                 "extracted": cand_c is not None,
+                "informative": informative,
                 "cand_compiled": compiled,
                 "passed": passed,
                 "cases_passed": verdict["n_passed"],
@@ -246,6 +282,7 @@ def main():
                   f"({gen_sec:.1f}s)")
 
     elapsed = time.time() - started
+    n_informative = stats["n"] - stats["uninformative"]
     summary = {
         "model": args.model,
         "adapter": args.adapter,
@@ -255,9 +292,14 @@ def main():
         "passed": stats["passed"],
         "ref_errors": stats["ref_errors"],
         "truncated": stats["truncated"],
+        "uninformative": stats["uninformative"],
+        "n_informative": n_informative,
         "output_kinds": stats["kinds"],
         "compile_rate": round(stats["compiled"] / stats["n"], 4),
         "pass_rate": round(stats["passed"] / stats["n"], 4),
+        # pass_rate over the pairs whose probes can actually tell a correct
+        # program from a do-nothing one
+        "pass_rate_informative": round(stats["passed"] / max(1, n_informative), 4),
         "by_opt": {
             opt: {
                 "n": v["n"],
@@ -267,7 +309,9 @@ def main():
         },
         "decoding": {"do_sample": False,
                      "max_new_tokens": args.max_new_tokens},
-        "cases": args.cases or "default",
+        "cases": args.cases or (
+            os.path.abspath(args.cases_by_source) if args.cases_by_source
+            else "default"),
         "elapsed_seconds": round(elapsed, 1),
         "ts": now_iso(),
     }
