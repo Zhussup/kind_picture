@@ -19,7 +19,7 @@
 
 ---
 
-> **Status (2026-10-22):** the pipeline works end-to-end and the second full
+> **Status (2026-10-23):** the pipeline works end-to-end and the second full
 > LoRA run is evaluated. On a 118-pair validation split the adapter compiles
 > **70.3%** of the answers; **27.1%** of them reproduce the reference behavior
 > when each program is tested on its own probes, **22.9%** when every program
@@ -28,6 +28,20 @@
 > the previous adapter and 26.9% / 0% for the base model. A do-nothing program
 > scores 5.1% on the fixed list and 0% on per-program probes, so the metric no
 > longer pays for empty answers. Numbers are reported as they are.
+>
+> **Finding — the model is trained on a format it will not meet.** The input
+> is a `gcc -S` listing: symbolic labels, no addresses, no instruction bytes.
+> In practice a company has a binary and nothing else, and assembly comes out
+> of a disassembler (`objdump -d`), which prints virtual addresses, hex bytes,
+> `call 0x401030 <printf@plt>` and RIP-relative operands. A model trained only
+> on listings would see a different rendering of the same code. Every record
+> keeps its `c_source`, so the disassembly corpus is a re-derivation of the
+> same programs — not a new collection.
+>
+> **Next:** rotate the training and evaluation input format to disassembly and
+> compare three adapters on identical programs — listings only, disassembly
+> only, and a mix. The dataset now records the teacher behind every pair
+> (`model`), so runs can be balanced or filtered by teacher.
 
 ## The idea
 
@@ -55,7 +69,7 @@ That constraint is what makes this project interesting:
 
 ```mermaid
 flowchart LR
-  T["406 task templates x 32 variations"] --> G["beam:cloud writes C"]
+  T["406 task templates x 32 variations"] --> G["teacher model (config.json) writes C"]
   G --> GCC["gcc -O0 / -O2"]
   GCC --> L["AT&T listing + reference C"]
   L --> B["build_dataset.py<br/>strip leaks, dedupe, hash split"]
@@ -172,14 +186,15 @@ averages: 0.229, 0.103, 0.057).
 
 | Metric | Value |
 |--------|-------|
-| Programs collected | **5,796** and counting (collector running since 2026-10-21) |
-| Programs in the last dataset build | 5,005 |
-| Listings (`-O0` + `-O2`) in that build | **9,440** (`-O0` 4,737, `-O2` 4,703) |
-| Train / validation pairs | **9,256 / 184**, split by hashed source id |
+| Programs collected | **6,834** and counting (collector running since 2026-10-21) |
+| Programs in the last dataset build | 6,834 |
+| Pairs (`-O0` + `-O2`) in that build | **12,927** (`-O0` 6,487, `-O2` 6,440) |
+| Train / validation pairs | **12,665 / 262**, split by hashed source id |
+| Pairs by teacher | `beam:cloud` 12,887, `deepseek-v4.1-flash:cloud` 40 |
 | Prompt space | 406 tasks x 32 wording variations = **12,992** |
-| Duplicates removed / compile failures excluded | 344 / 226 |
-| Programs with a real probe list (`gen_cases.py`) | **4,459 of 4,740** (94.1%) |
-| Pairs in the last training run | 2,579 — the other 2,770 exceeded 2,048 tokens |
+| Duplicates removed / compile failures excluded | 419 / 322 |
+| Programs with a real probe list (`gen_cases.py`) | **4,459 of 4,740** in the previous build; not regenerated for this one |
+| Pairs in the last training run | 2,579 — the other 2,770 of that older split exceeded 2,048 tokens |
 | Validation snapshot behind every number here | the older **118-pair** split, kept as `ml/asm/dataset/val118.jsonl` |
 
 Every pair carries two views of the same program: `-O0` preserves the source
@@ -189,7 +204,7 @@ side.
 
 The evaluation numbers in this README come from the 118-pair split that existed
 before the last rebuild, kept as a snapshot so old and new runs stay
-comparable. The current build has 184 validation pairs; nothing has been
+comparable. The current build has 262 validation pairs; nothing has been
 trained on them yet.
 
 ## Quick start
@@ -248,8 +263,8 @@ The scripts above assume the project virtualenv is active. After a reboot the
 system `python3` has no PyTorch, so either `source .venv/bin/activate` first or
 call `.venv/bin/python` explicitly.
 
-Collect more programs (needs a logged-in Ollama Cloud account and the
-`beam:cloud` model):
+Collect more programs (needs a logged-in Ollama Cloud account and the model
+named in `ml/asm/config.json`, `beam:cloud` by default):
 
 ```bash
 cd ml/asm
@@ -265,6 +280,7 @@ python3 gen_c.py --status    # checkpoint and error statistics
 kind_picture/
 ├── ml/asm/                 asm → C pipeline (the main project)
 │   ├── gen_c.py            collector: task → C → gcc -O0/-O2 listings
+│   ├── config.json         active teacher model for the collector
 │   ├── collector.sh        supervisor: restarts the collector if it dies
 │   ├── build_dataset.py    leak stripping, dedupe, train/val split
 │   ├── gen_cases.py        per-program differential probes
@@ -298,8 +314,12 @@ kind_picture/
       set of 10 probes for every program: 27.1% of 118
 - [x] Resumable evaluation and probe generation — a shutdown costs one pair,
       not the run
+- [x] Record the teacher model in every dataset pair, so runs can be balanced
+      or filtered by teacher
+- [ ] Rotate the input format to disassembly (`objdump -d`) and compare three
+      adapters on identical programs: listings only, disassembly only, mixed
 - [ ] Line B: freestanding `_start` programs verified by `verifier.py`
-- [ ] Train on the rebuilt 9,256-pair split (the current adapter saw 2,579)
+- [ ] Train on the rebuilt 12,665-pair split (the current adapter saw 2,579)
 - [ ] A larger model on a two-GPU server
 - [ ] Inference CLI: listing in, verifiable C out
 
@@ -309,6 +329,14 @@ This is an early research prototype, and the README says so on purpose:
 
 - The task is narrow: small hosted C programs generated from 406 templates,
   compiled by gcc. It is not a general-purpose decompiler.
+- The input format is a compiler listing, not a disassembly. Real binaries
+  produce `objdump -d` output with addresses, hex bytes and PLT operands, and
+  the model has never seen that format; the gap is unmeasured until the
+  disassembly round runs.
+- The corpus now has two teachers, and they are far from balanced: 12,887
+  pairs from `beam:cloud` against 40 from `deepseek-v4.1-flash:cloud`. The
+  `model` field makes the imbalance visible and fixable, but no rebalancing
+  has been applied yet.
 - The current model is 0.6B parameters. The second full run puts 70.3% of
   unseen answers through the compiler and 27.1% through the differential test;
   the rest either fail to compile or disagree with the reference on at least
@@ -323,9 +351,10 @@ This is an early research prototype, and the README says so on purpose:
 - Training skips pairs longer than `--max-seq-len` (2,048 tokens in the current
   run) rather than truncating them: 2,770 of the 5,349 pairs in that split never
   reached the last run. Long programs are underrepresented, and the adapter has
-  not seen the 9,256-pair rebuild.
-- The corpus comes from a single cloud model, so its style and mistakes are
-  baked into the data.
+  not seen the 12,665-pair rebuild.
+- The corpus is dominated by a single cloud model (`beam:cloud`, 12,887 of
+  12,927 pairs), so its style and mistakes are baked into the data. The 40
+  pairs from `deepseek-v4.1-flash:cloud` are too few to offset that.
 - Line B (freestanding assembly) is designed but not collected yet.
 
 ## Docs

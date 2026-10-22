@@ -31,8 +31,9 @@ model answer (C) ──► difftest.py: original C vs predicted C ──► verd
 
 ## Files
 
-- `gen_c.py` — collector for line A1: asks the model (`beam:cloud`) for a C
-  program, compiles it with gcc at `-O0` and `-O2`, stores both listings.
+- `gen_c.py` — collector for line A1: asks the model named in `config.json`
+  (`beam:cloud` by default) for a C program, compiles it with gcc at `-O0` and
+  `-O2`, stores both listings.
 - `collector.sh` — supervisor for `gen_c.py`: restarts it whenever it exits, for
   any reason (uncaught exception, killed process, Ollama gone after a shutdown),
   with a `flock` guard so a second copy cannot start.
@@ -80,8 +81,8 @@ model answer (C) ──► difftest.py: original C vs predicted C ──► verd
    `dset/collector.py`: 406 tasks × 32 variations = **12,992 combinations**.
    Once the space is exhausted the prompts repeat, but the answers differ
    (the temperature is random on every request).
-2. A request goes to `/api/chat` (model `beam:cloud`). The system prompt
-   demands exactly one ` ```c ` block.
+2. A request goes to `/api/chat` with the model from `config.json`. The system
+   prompt demands exactly one ` ```c ` block.
 3. The C code is extracted from the response: first a block tagged `c` is
    looked for; if there is none, any block is accepted; if there are several,
    the longest one wins.
@@ -120,6 +121,7 @@ Each sample is a chat record:
   "id": "a1-17-O2",
   "source_id": 17,
   "opt": "O2",
+  "model": "beam:cloud",
   "messages": [
     {"role": "system", "content": "You are an expert reverse engineer. …"},
     {"role": "user", "content": "Optimization level: -O2\n\nAssembly listing:\n```asm\n…\n```"},
@@ -129,6 +131,14 @@ Each sample is a chat record:
 ```
 
 - The reference record produces **two samples** (`-O0` and `-O2`).
+- **Teacher provenance:** every sample carries the `model` that wrote its C,
+  copied from the record in `raw_c/` (`"unknown"` for shards collected before
+  the field existed). The collector takes the active model from
+  `config.json`, so switching teachers needs no code change. Two teachers can
+  answer the same task at different lengths and in different styles, and a
+  run that trains on them needs to see that split to balance or filter by it
+  without joining back to `raw_c/`. `stats.json` reports the counts as
+  `by_model`.
 - **Leak stripping:** `-fverbose-asm` embeds the original source text in the
   listing as `# prog.c:7: …` comments. If kept, reconstruction would be pure
   copying. `build_dataset.py` removes exactly those lines
@@ -270,10 +280,12 @@ the gain, and compile rate is not a proxy for quality.
        width="840">
 </picture>
 
-The last `build_dataset.py` run produced **9,256 train / 184 validation** pairs
-from 5,005 collected programs; the adapter above was trained on the earlier
-2,579-pair subset of a 5,349-pair split, so the rebuild is not reflected in any
-number here yet.
+The last `build_dataset.py` run produced **12,665 train / 262 validation** pairs
+from 6,834 collected programs (`-O0` 6,487, `-O2` 6,440; 419 duplicates and 322
+compile failures excluded). Two teachers are in the mix and they are far from
+balanced: `beam:cloud` wrote 12,887 pairs, `deepseek-v4.1-flash:cloud` 40. The
+adapter above was trained on the earlier 2,579-pair subset of a 5,349-pair
+split, so the rebuild is not reflected in any number here yet.
 
 ## Usage
 
@@ -348,6 +360,6 @@ pkill -f "gen_c.py"       # stop the collector itself
 The checkpoint `state_gen_c.json` is written atomically every minute and after
 every sample, so a restart resumes at the last finished sample. The supervisor
 does not survive a reboot on its own: start it again, or put it in a systemd
-user unit. The collector needs a running Ollama with a logged-in account and
-the `beam:cloud` model — without it, every request fails and the process backs
-off instead of dying.
+user unit. The collector needs a running Ollama with a logged-in account and the
+model named in `config.json` (`beam:cloud` by default) — without it, every
+request fails and the process backs off instead of dying.

@@ -99,6 +99,7 @@ def build(val_ratio, min_asm_lines):
         "skipped_not_compiled": 0,
         "train": 0, "val": 0,
         "by_opt": {"O0": 0, "O2": 0},
+        "by_model": {},
     }
     seen_asm = set()
     train, val = [], []
@@ -126,10 +127,17 @@ def build(val_ratio, min_asm_lines):
                 stats["skipped_dup"] += 1
                 continue
             seen_asm.add(key)
+            # The teacher is part of the sample: two models can answer the
+            # same task at very different lengths and in different styles,
+            # and the run that trains on them must be able to balance or
+            # filter by teacher without joining back to raw_c/.
+            model = rec.get("model") or "unknown"
+            stats["by_model"][model] = stats["by_model"].get(model, 0) + 1
             sample = {
                 "id": f"a1-{source_id}-{opt}",
                 "source_id": source_id,
                 "opt": opt,
+                "model": model,
                 "messages": [
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": user_message(asm, opt)},
